@@ -11,4 +11,7 @@ echo "\n--- Starting Step 2: Field Initialization ---"
 echo "\n--- Starting Step 3: Main Simulation ---"
 ./03_run_simulation.sh
 
+echo "\n--- Starting Step 4: Post processing ---"
+./04_run_postprocessing.sh
+
 echo "\n--- All steps completed successfully! ---"
