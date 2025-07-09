@@ -48,7 +48,7 @@ echo "--> Generating isosurface plots with plotIso.py..."
 runApplication python3 plotIso.py --np 32 --fr 5
 
 
-# --- TASK 2: GENERATE BALLISTIC TRAJECTORY PLOTS ---
+# --- TASK 2: GENERATE BALLISTIC IMPACT RASTER MAPS ---
 
 echo "--> Cleaning up previous ballistic raster maps..."
 rm -rf postProcessing/raster_maps/ballistics
