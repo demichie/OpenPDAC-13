@@ -1,4 +1,4 @@
-# OpenPDAC-dev
+# OpenPDAC-13
 
 OpenPDAC is an OpenFOAM module based on the module multiphaseEuler, distributed with OpenFOAM. 
 
@@ -17,6 +17,6 @@ Five test cases are provided:
 - a 2D impinging flow with two solid phases.
 
 This version is based on the Ubuntu package:
-openfoam-dev   20250630     amd64  
+openfoam13_20250708_amd64.deb  
 
 This code is not approved not endorsed by the OpenFOAM Foundation or by ESI Ltd, the owner of OpenFOAM.
