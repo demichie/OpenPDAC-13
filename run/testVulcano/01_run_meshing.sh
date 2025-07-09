@@ -20,6 +20,18 @@ cd "${0%/*}" || exit 1
 # Source the OpenFOAM functions for running applications
 . "$WM_PROJECT_DIR/bin/tools/RunFunctions"
 
+# =========================================================================
+# Activate Conda environment for Python script execution
+# =========================================================================
+echo "--> Activating Conda environment: OpenPDACconda"
+
+# Source Conda's shell functions. This is necessary for 'conda activate' to work in scripts.
+# The `conda info --base` command robustly finds your conda installation.
+source "$(conda info --base)/etc/profile.d/conda.sh"
+
+# Activate the specific environment
+conda activate OpenPDACconda
+
 # --- MESHING ---
 
 echo "--> Cleaning the case from previous runs..."
@@ -54,6 +66,13 @@ runParallel topoGrid
 
 echo "--> Performing final mesh quality check on the deformed mesh..."
 runParallel checkMesh -allGeometry -allTopology -writeSets
+
+# =========================================================================
+# Deactivate the Conda environment
+# =========================================================================
+conda deactivate
+echo "--> Conda environment deactivated."
+# =========================================================================
 
 # -----------------------------------------------------------------------------
 echo
