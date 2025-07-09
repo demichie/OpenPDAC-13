@@ -27,6 +27,7 @@ This case demonstrates advanced techniques like multi-block meshing for local re
     -   **Stage 1:** Hydrostatic atmospheric profile generation (`hydrostaticInitialisation = true`).
     -   **Stage 2:** Imposing explosion source conditions in the sub-surface crater blocks using `setFields`.
 -   **Phenomenon:** Transient, multiphase, explosive dispersal of gas and particles from a sub-surface source.
+-   **Workflow:** Features a detailed, step-by-step execution to guide the user through meshing, initialization, the final run, and post-processing.
 
 ---
 
@@ -96,7 +97,17 @@ This script will:
 2.  Run the `OpenPDAC` solver to simulate the explosion dynamics.
 3.  Reconstruct the parallel results into a single dataset for visualization.
 
-**After this step, the simulation is complete.** You can open the case in ParaView to visualize the full time-series of the explosion.
+#### Step 4 (Optional): Run post-processing to generate plots and maps
+This script executes the post-processing.
+```bash
+./04_run_postprocessing.sh
+```
+This script will:
+1.  Create raster maps for pyrocalstic flow invasion.
+2.  Create rasper maps for ballistic impact and a csv file with ballistic impact information.
+3.  Create videos from different angle of isosurfaces of solid volume fraction.
+
+**After this step, the simulation is complete.** You can also open the case in ParaView to visualize the full time-series of the explosion.
 
 ### Automated Execution
 
