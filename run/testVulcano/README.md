@@ -32,15 +32,26 @@ This case demonstrates advanced techniques like multi-block meshing for local re
 
 ## 3. Prerequisites
 
+### OpenFOAM
 -   A working installation of OpenFOAM.
 -   The **OpenPDAC** solver and its associated utilities (like `topoGrid`) must be compiled and accessible in your environment.
--   Python 3 (for the `smoothCraterArea.py` script).
+
+### Python Environment (Anaconda/Miniconda)
+This tutorial uses Python for pre- and post-processing steps. To ensure all dependencies are met, it is **mandatory** to use the provided Conda environment.
+1.  **Install Anaconda or Miniconda:** If you don't have it, download and install it from [anaconda.com](https://www.anaconda.com/products/distribution).
+2.  **Create the Conda Environment:** Navigate to this tutorial's directory (`testVulcano`) in your terminal and run the following command to create the environment from the `environment.yml` file. This only needs to be done once.
+    ```bash
+    conda env create -f environment.yml
+    ```
+    This will create a new environment named `OpenPDACconda` with all the required Python packages.
 
 ---
 
 ## 4. How to Run the Case
 
 This tutorial is structured with numbered scripts to allow for a step-by-step execution. This is the **recommended approach for learning**.
+
+**Note:** The run scripts (`01_run_meshing.sh`, etc.) will **automatically activate and deactivate** the `OpenPDACconda` environment when they need to execute a Python script. You do not need to activate it manually before running them.
 
 ### Step-by-Step Execution (Recommended)
 
