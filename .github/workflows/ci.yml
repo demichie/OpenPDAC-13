@@ -24,7 +24,16 @@ jobs:
           sudo apt-get update
           sudo apt-get -y install openfoam13
 
-      # Step 3: Configure the Bash environment (Mimics the Dockerfile)
+      # Step 3: Setup Conda and Install Python Dependencies
+      - name: Setup Conda and Install Dependencies
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-activate-base: false
+          activate-environment: OpenPDACconda # environment name in yml file
+          environment-file: environment.yml 
+          python-version: 3.11.11 
+
+      # Step 4: Configure the Bash environment (Mimics the Dockerfile)
       - name: Configure Bash Environment
         run: |
           # Add the OpenFOAM source command to the user's .bashrc file.
@@ -32,7 +41,7 @@ jobs:
           echo "source /opt/openfoam13/etc/bashrc" >> /home/runner/.bashrc
           echo "Bash environment configured."
 
-      # Step 4: Compile Solver and Utilities
+      # Step 5: Compile Solver and Utilities
       - name: Compile Solver and Utilities
         # Run commands in an INTERACTIVE bash shell (-i)
         # This forces it to read .bashrc first, loading the OpenFOAM environment.
@@ -47,7 +56,7 @@ jobs:
             wmake
           '
 
-      # Step 5: Run the test cases
+      # Step 6: Run the test cases
       - name: Run test cases
         # Run this in an interactive shell as well
         run: |
