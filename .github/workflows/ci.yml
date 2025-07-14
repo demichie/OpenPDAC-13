@@ -1,8 +1,6 @@
 name: Build and Test OpenPDAC-13
 
 on:
-  pull_request:
-    branches: [ main ]
   push:
     tags:
       - '[0-9]+.*'
@@ -12,11 +10,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Step 2: Install OpenFOAM 13
       - name: Install OpenFOAM 13
         run: |
           sudo sh -c "wget -O - https://dl.openfoam.org/gpg.key | apt-key add -"
@@ -24,53 +20,42 @@ jobs:
           sudo apt-get update
           sudo apt-get -y install openfoam13
 
-      # Step 3: Setup Conda and Install Python Dependencies
-      - name: Setup Conda and Install Dependencies
+      - name: Setup Conda and Create Environment
         uses: conda-incubator/setup-miniconda@v3
         with:
-          auto-activate-base: false
+          auto-activate-base: false 
           activate-environment: ""
-          environment-file: environment.yml  
+          environment-file: environment.yml
+          
+      # We no longer need the 'Configure Bash Environment' step that modifies .bashrc
 
-      # Step 4: Configure the Bash environment (Mimics the Dockerfile)
-      - name: Configure Bash Environment
-        run: |
-          # First, initialize conda for the bash shell.
-          # This will add the necessary conda configuration to .bashrc.
-          conda init bash
-
-          # Second, append the OpenFOAM source command to .bashrc.
-          # The order here is important for later activation.
-          echo "source /opt/openfoam13/etc/bashrc" >> /home/runner/.bashrc
-          echo "Bash environment configured."
-
-      # Step 5: Compile Solver and Utilities
       - name: Compile Solver and Utilities
-        # Run commands in an INTERACTIVE bash shell (-i)
-        # This forces it to read .bashrc first, loading the OpenFOAM environment.
+        # The shell is now specified at the job level for consistency
+        shell: bash -el {0}
         run: |
-          bash -ic '
-            echo "Compiling OpenPDAC solver..."
-            cd applications/OpenPDAC
-            ./Allwmake
-            
-            echo "Compiling topoGrid utility..."
-            cd ../../applications/utilities/topoGrid
-            wmake
-          '
+          # Explicitly load the OpenFOAM environment first
+          source /opt/openfoam13/etc/bashrc
+          
+          # Now, explicitly activate the conda environment.
+          # The 'conda' command is available from the setup-miniconda step.
+          conda activate OpenPDACconda
+          
+          # Proceed with compilation
+          echo "Compiling OpenPDAC solver..."
+          cd applications/OpenPDAC
+          # ./Allwmake
+          
+          echo "Compiling topoGrid utility..."
+          cd ../../applications/utilities/topoGrid
+          wmake
 
-      # Step 6: Run the test cases
-      - name: Run test cases
-        # Run this in an interactive shell as well
+      - name: Run the test cases
+        shell: bash -el {0}
         run: |
-          bash -ic '
-            # Disable job control warnings
-            set +m
+          # Repeat the same robust activation sequence
+          source /opt/openfoam13/etc/bashrc
+          conda activate OpenPDACconda
 
-            # Manually activate the conda environment here as well.
-            conda activate OpenPDACconda
-
-            cd run
-            chmod +x ./run-all-tests.sh
-            ./run-all-tests.sh
-          '
+          cd run
+          chmod +x ./run-all-tests.sh
+          ./run-all-tests.sh
