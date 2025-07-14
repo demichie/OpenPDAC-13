@@ -10,59 +10,57 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    
-    # NEW: Define the shell for all steps at the job level
-    defaults:
-      run:
-        shell: bash -l {0}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install OpenFOAM 13
+      - name: Install System Dependencies
         run: |
           sudo sh -c "wget -O - https://dl.openfoam.org/gpg.key | apt-key add -"
           sudo add-apt-repository http://dl.openfoam.org/ubuntu
           sudo apt-get update
-          sudo apt-get -y install openfoam13
-
-      - name: Setup Conda and Install Dependencies from File
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          # Tell conda to create and activate the environment named in the file
-          activate-environment: OpenPDACconda 
-          environment-file: environment.yml
-          # No need for auto-activate-base, it will be handled by the activation
+          sudo apt-get -y install openfoam13 wget
           
+      - name: Install Miniconda and Create Environment Manually
+        run: |
+          # Scarica e installa Miniconda
+          wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
+          bash miniconda.sh -b -p $HOME/miniconda
+          
+          # Inizializza Conda per la shell e crea l'ambiente
+          source $HOME/miniconda/bin/activate
+          conda init
+          conda env create -f environment.yml
+
       - name: Compile Solver and Utilities
         run: |
-          # The Conda environment is already active from the previous step.
-          # We just need to source OpenFOAM on top of it.
-          source /opt/openfoam13/etc/bashrc
-          
-          # (Diagnostic) Verify both environments are loaded
-          echo "--- Python Path ---"
-          which python
-          echo "--- Conda Env ---"
-          conda info --envs
-          echo "--- OpenFOAM Command Path ---"
-          which blockMesh
-          echo "---------------------"
-          
-          echo "Compiling OpenPDAC solver..."
-          cd applications/OpenPDAC
-          # ./Allwmake
-          
-          echo "Compiling topoGrid utility..."
-          cd ../../applications/utilities/topoGrid
-          wmake
+          bash -ic '
+            set +m
+            
+            # Il .bashrc è stato modificato da "conda init"
+            # Quindi l''attivazione funzionerà
+            conda activate OpenPDACconda
+            
+            # Ora carica OpenFOAM
+            source /opt/openfoam13/etc/bashrc
+            
+            # Compila
+            echo "Compiling OpenPDAC solver..."
+            cd applications/OpenPDAC
+            # ./Allwmake
+            cd ../../applications/utilities/topoGrid
+            wmake
+          '
 
       - name: Run the test cases
         run: |
-          # Repeat the simple sourcing of OpenFOAM
-          source /opt/openfoam13/etc/bashrc
-
-          cd run
-          chmod +x ./run-all-tests.sh
-          ./run-all-tests.sh
+          bash -ic '
+            set +m 
+            conda activate OpenPDACconda
+            source /opt/openfoam13/etc/bashrc
+            
+            cd run
+            chmod +x ./run-all-tests.sh
+            ./run-all-tests.sh
+          '
