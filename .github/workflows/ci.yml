@@ -35,8 +35,12 @@ jobs:
       # Step 4: Configure the Bash environment (Mimics the Dockerfile)
       - name: Configure Bash Environment
         run: |
-          # Add the OpenFOAM source command to the user's .bashrc file.
-          # This makes the environment persistent for interactive shells.
+          # First, initialize conda for the bash shell.
+          # This will add the necessary conda configuration to .bashrc.
+          conda init bash
+
+          # Second, append the OpenFOAM source command to .bashrc.
+          # The order here is important for later activation.
           echo "source /opt/openfoam13/etc/bashrc" >> /home/runner/.bashrc
           echo "Bash environment configured."
 
