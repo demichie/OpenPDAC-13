@@ -1,11 +1,10 @@
 name: Build and Test OpenPDAC-13
 
-# This workflow runs on any push or pull request to the 'main' branch.
+# Trigger the workflow only when a tag is pushed
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    tags:
+      - '*' # The '*' is a wildcard for any tag name
 
 jobs:
   build-and-test:
