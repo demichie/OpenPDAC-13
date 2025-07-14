@@ -29,7 +29,7 @@ jobs:
         uses: conda-incubator/setup-miniconda@v3
         with:
           auto-activate-base: false
-          activate-environment: OpenPDACconda # environment name in yml file
+          activate-environment: ""
           environment-file: environment.yml 
           python-version: 3.11.11 
 
@@ -61,6 +61,12 @@ jobs:
         # Run this in an interactive shell as well
         run: |
           bash -ic '
+            # Disable job control warnings
+            set +m
+
+            # Manually activate the conda environment here as well.
+            conda activate OpenPDACconda
+
             cd run
             chmod +x ./run-all-tests.sh
             ./run-all-tests.sh
