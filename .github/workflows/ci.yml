@@ -30,8 +30,7 @@ jobs:
         with:
           auto-activate-base: false
           activate-environment: ""
-          environment-file: environment.yml 
-          python-version: 3.11.11 
+          environment-file: environment.yml  
 
       # Step 4: Configure the Bash environment (Mimics the Dockerfile)
       - name: Configure Bash Environment
