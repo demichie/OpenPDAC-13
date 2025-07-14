@@ -412,7 +412,7 @@ void Foam::solvers::OpenPDAC::cellPressureCorrector()
 
                     pEqn.solve();
                 
-                    const DynamicList<SolverPerformance<scalar>>& sp
+                    const DynamicList<SolverPerformance<scalar>> sp
                     (
                         Residuals<scalar>::field(mesh, "p_rgh")
                     );
