@@ -29,23 +29,30 @@ jobs:
           activate-environment: ""
           environment-file: environment.yml
           
-      # Non modifichiamo più .bashrc. È troppo fragile.
-
       - name: Compile Solver and Utilities
         run: |
           bash -ic '
-            set +m  # Sopprime le avvertenze del terminale
+            set +m  # Suppress terminal warnings
 
-            # 1. Carica l''ambiente OpenFOAM
-            source /opt/openfoam13/etc/bashrc
+            # --- START OF NEW ACTIVATION SEQUENCE ---
 
-            # 2. Carica l''ambiente Conda (trovando il path di base di miniconda)
+            # 1. Initialize Conda FIRST
             source $(conda info --base)/etc/profile.d/conda.sh
             
-            # 3. Attiva l''ambiente Python specifico
-            conda activate OpenPDACconda
+            # 2. (Diagnostic) Verify that the environment is visible
+            echo "--- Available Conda Environments ---"
+            conda info --envs
+            echo "------------------------------------"
             
-            # 4. Ora, procedi con la compilazione
+            # 3. Activate the Conda environment
+            conda activate OpenPDACconda
+
+            # 4. NOW, source the OpenFOAM environment on top of the active Conda env
+            source /opt/openfoam13/etc/bashrc
+            
+            # --- END OF NEW ACTIVATION SEQUENCE ---
+            
+            # 5. Proceed with compilation
             echo "Compiling OpenPDAC solver..."
             cd applications/OpenPDAC
             # ./Allwmake
@@ -58,13 +65,14 @@ jobs:
       - name: Run the test cases
         run: |
           bash -ic '
-            set +m # Sopprime le avvertenze del terminale
+            set +m 
 
-            # Ripeti la stessa sequenza di attivazione robusta
-            source /opt/openfoam13/etc/bashrc
+            # Repeat the same robust activation sequence
             source $(conda info --base)/etc/profile.d/conda.sh
             conda activate OpenPDACconda
+            source /opt/openfoam13/etc/bashrc
 
+            # Proceed with tests
             cd run
             chmod +x ./run-all-tests.sh
             ./run-all-tests.sh
