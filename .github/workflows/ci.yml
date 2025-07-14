@@ -1,0 +1,57 @@
+name: Build and Test OpenPDAC-13
+
+# This workflow runs on any push or pull request to the 'main' branch.
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    # The job runs on the latest version of Ubuntu
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Check out the repository code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Step 2: Install OpenFOAM 13 and its dependencies
+      - name: Install OpenFOAM 13
+        run: |
+          sudo sh -c "wget -O - https://dl.openfoam.org/gpg.key | apt-key add -"
+          sudo add-apt-repository http://dl.openfoam.org/ubuntu
+          sudo apt-get update
+          sudo apt-get -y install openfoam13
+      
+      # Step 3: Compile the solver and utilities
+      - name: Compile Solver and Utilities
+        run: |
+          # Source the OpenFOAM environment to make its commands available
+          source /opt/openfoam13/etc/bashrc
+
+          # Compile the OpenPDAC solver
+          echo "Compiling OpenPDAC solver..."
+          cd applications/OpenPDAC
+          ./Allwmake
+          
+          # Compile the topoGrid utility
+          echo "Compiling topoGrid utility..."
+          cd ../../applications/utilities/topoGrid
+          wmake
+
+      # Step 4: Run the test cases
+      - name: Run test cases
+        run: |
+          # Source the OpenFOAM environment again for this new step
+          source /opt/openfoam13/etc/bashrc
+          
+          # Navigate into the main test directory
+          cd run
+          
+          # Make the master test script executable
+          chmod +x ./run-all-tests.sh
+          
+          # Execute the test script
+          ./run-all-tests.sh
