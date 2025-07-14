@@ -453,14 +453,15 @@ def main(argv):
         i = 0
 
         for j, (x, y) in enumerate(zip(X0_1d, Y0_1d)):
-
+            """
             printProgressBar(np.asarray(i) + 1,
                              nxy,
                              prefix='Progress:',
                              suffix='Complete',
                              decimals=1,
                              bar_length=50)
-
+            """
+            
             dist = line.distance(Point(x, y))
 
             # distance of point (x,y) from line
@@ -605,13 +606,14 @@ def main(argv):
 
     # interpolation for the level corresponding to the crater
     for j, (x, y) in enumerate(zip(X1_1d, Y1_1d)):
-
+        """    
         printProgressBar(np.asarray(i) + 1,
                          nxy,
                          prefix='Progress:',
                          suffix='Complete',
                          decimals=1,
                          bar_length=50)
+        """
 
         # distance of point (x,y) from line
         dist = line.distance(Point(x, y))
