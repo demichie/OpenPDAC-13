@@ -1,6 +1,8 @@
 name: Build and Test OpenPDAC-13
 
 on:
+  pull_request:
+    branches: [ main ]
   push:
     tags:
       - '[0-9]+.*'
@@ -27,35 +29,43 @@ jobs:
           activate-environment: ""
           environment-file: environment.yml
           
-      # We no longer need the 'Configure Bash Environment' step that modifies .bashrc
+      # Non modifichiamo più .bashrc. È troppo fragile.
 
       - name: Compile Solver and Utilities
-        # The shell is now specified at the job level for consistency
-        shell: bash -el {0}
         run: |
-          # Explicitly load the OpenFOAM environment first
-          source /opt/openfoam13/etc/bashrc
-          
-          # Now, explicitly activate the conda environment.
-          # The 'conda' command is available from the setup-miniconda step.
-          conda activate OpenPDACconda
-          
-          # Proceed with compilation
-          echo "Compiling OpenPDAC solver..."
-          cd applications/OpenPDAC
-          # ./Allwmake
-          
-          echo "Compiling topoGrid utility..."
-          cd ../../applications/utilities/topoGrid
-          wmake
+          bash -ic '
+            set +m  # Sopprime le avvertenze del terminale
+
+            # 1. Carica l''ambiente OpenFOAM
+            source /opt/openfoam13/etc/bashrc
+
+            # 2. Carica l''ambiente Conda (trovando il path di base di miniconda)
+            source $(conda info --base)/etc/profile.d/conda.sh
+            
+            # 3. Attiva l''ambiente Python specifico
+            conda activate OpenPDACconda
+            
+            # 4. Ora, procedi con la compilazione
+            echo "Compiling OpenPDAC solver..."
+            cd applications/OpenPDAC
+            # ./Allwmake
+            
+            echo "Compiling topoGrid utility..."
+            cd ../../applications/utilities/topoGrid
+            wmake
+          '
 
       - name: Run the test cases
-        shell: bash -el {0}
         run: |
-          # Repeat the same robust activation sequence
-          source /opt/openfoam13/etc/bashrc
-          conda activate OpenPDACconda
+          bash -ic '
+            set +m # Sopprime le avvertenze del terminale
 
-          cd run
-          chmod +x ./run-all-tests.sh
-          ./run-all-tests.sh
+            # Ripeti la stessa sequenza di attivazione robusta
+            source /opt/openfoam13/etc/bashrc
+            source $(conda info --base)/etc/profile.d/conda.sh
+            conda activate OpenPDACconda
+
+            cd run
+            chmod +x ./run-all-tests.sh
+            ./run-all-tests.sh
+          '
