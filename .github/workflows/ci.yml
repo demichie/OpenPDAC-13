@@ -1,22 +1,20 @@
 name: Build and Test OpenPDAC-13
 
-# Trigger the workflow only when a tag is pushed
 on:
   push:
     tags:
-      - '*' # The '*' is a wildcard for any tag name
+      - 'v[0-9]+.*'
 
 jobs:
   build-and-test:
-    # The job runs on the latest version of Ubuntu
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Check out the repository code
+      # Step 1: Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Step 2: Install OpenFOAM 13 and its dependencies
+      # Step 2: Install OpenFOAM 13
       - name: Install OpenFOAM 13
         run: |
           sudo sh -c "wget -O - https://dl.openfoam.org/gpg.key | apt-key add -"
@@ -24,10 +22,12 @@ jobs:
           sudo apt-get update
           sudo apt-get -y install openfoam13
       
-      # Step 3: Compile the solver and utilities
+      # Step 3: Compile Solver and Utilities
       - name: Compile Solver and Utilities
+        # Force this step to run using the bash shell
+        shell: bash
         run: |
-          # Source the OpenFOAM environment to make its commands available
+          # Source the OpenFOAM environment
           source /opt/openfoam13/etc/bashrc
 
           # Compile the OpenPDAC solver
@@ -42,8 +42,10 @@ jobs:
 
       # Step 4: Run the test cases
       - name: Run test cases
+        # Force this step to run using the bash shell as well
+        shell: bash
         run: |
-          # Source the OpenFOAM environment again for this new step
+          # Source the OpenFOAM environment
           source /opt/openfoam13/etc/bashrc
           
           # Navigate into the main test directory
