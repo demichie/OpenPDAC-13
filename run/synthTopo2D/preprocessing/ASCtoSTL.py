@@ -16,6 +16,8 @@ import skimage.io
 
 import struct
 
+from scipy.interpolate import RegularGridInterpolator
+
 def save_stl(vertices, filename):
     # Apri il file in modalità scrittura
     with open(filename, 'w') as f:
@@ -295,7 +297,9 @@ def main(argv):
     print('bb', bb)
 
     # interpolate with values from original fine grid
-    f = interpolate.interp2d(xinit, yinit, Zinit, kind='linear')
+    f = RegularGridInterpolator((yinit, xinit), Zinit)
+
+    # f = interpolate.interp2d(xinit, yinit, Zinit, kind='linear')
 
     try:
 
@@ -471,7 +475,7 @@ def main(argv):
                 x_check.append(x)
                 y_check.append(y)
 
-                z = f(x, y)
+                z = f((y, x))
 
                 z_check.append(float(z))
                 z_check_org.append(float(z))
@@ -552,7 +556,7 @@ def main(argv):
 
     for j, (x, y) in enumerate(zip(xedge, yedge)):
 
-        zedge[j] = f(x, y)
+        zedge[j] = f((y, x))
 
     print(zedge.shape)
     xy = np.concatenate([xedge, yedge], axis=1)
@@ -680,7 +684,7 @@ def main(argv):
 
                 RBF_interpolation = False
 
-            z_org = f(x, y)
+            z_org = f((y, x))
 
             if RBF_interpolation:
 
