@@ -1,6 +1,8 @@
 name: Build and Test OpenPDAC-13
 
 on:
+  pull_request:
+    branches: [ main ]
   push:
     tags:
       - '[0-9]+.*'
@@ -21,38 +23,36 @@ jobs:
           sudo add-apt-repository http://dl.openfoam.org/ubuntu
           sudo apt-get update
           sudo apt-get -y install openfoam13
-      
-      # Step 3: Compile Solver and Utilities
+
+      # Step 3: Configure the Bash environment (Mimics the Dockerfile)
+      - name: Configure Bash Environment
+        run: |
+          # Add the OpenFOAM source command to the user's .bashrc file.
+          # This makes the environment persistent for interactive shells.
+          echo "source /opt/openfoam13/etc/bashrc" >> /home/runner/.bashrc
+          echo "Bash environment configured."
+
+      # Step 4: Compile Solver and Utilities
       - name: Compile Solver and Utilities
-        # Force this step to run using the bash shell
-        shell: bash
+        # Run commands in an INTERACTIVE bash shell (-i)
+        # This forces it to read .bashrc first, loading the OpenFOAM environment.
         run: |
-          # Source the OpenFOAM environment
-          source /opt/openfoam13/etc/bashrc
+          bash -ic '
+            echo "Compiling OpenPDAC solver..."
+            cd applications/OpenPDAC
+            ./Allwmake
+            
+            echo "Compiling topoGrid utility..."
+            cd ../../applications/utilities/topoGrid
+            wmake
+          '
 
-          # Compile the OpenPDAC solver
-          echo "Compiling OpenPDAC solver..."
-          cd applications/OpenPDAC
-          ./Allwmake
-          
-          # Compile the topoGrid utility
-          echo "Compiling topoGrid utility..."
-          cd ../../applications/utilities/topoGrid
-          wmake
-
-      # Step 4: Run the test cases
+      # Step 5: Run the test cases
       - name: Run test cases
-        # Force this step to run using the bash shell as well
-        shell: bash
+        # Run this in an interactive shell as well
         run: |
-          # Source the OpenFOAM environment
-          source /opt/openfoam13/etc/bashrc
-          
-          # Navigate into the main test directory
-          cd run
-          
-          # Make the master test script executable
-          chmod +x ./run-all-tests.sh
-          
-          # Execute the test script
-          ./run-all-tests.sh
+          bash -ic '
+            cd run
+            chmod +x ./run-all-tests.sh
+            ./run-all-tests.sh
+          '
