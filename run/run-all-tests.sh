@@ -47,6 +47,13 @@ shorten_run() {
 for test_case_dir in synthTopo2D/; do
   test_case_dir=${test_case_dir%/}
 
+  if [ -f "${test_case_dir}/.noTest" ]; then
+    echo "----------------------------------------------------"
+    echo "Skipping test case: ${test_case_dir} (.noTest file found)"
+    echo "----------------------------------------------------"
+    continue # Questo è il comando chiave per saltare l'iterazione corrente del loop
+  fi
+
   echo "----------------------------------------------------"
   echo "Processing test case: ${test_case_dir}"
   echo "----------------------------------------------------"
