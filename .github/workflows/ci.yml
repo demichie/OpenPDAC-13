@@ -48,7 +48,7 @@ jobs:
             # Compila
             echo "Compiling OpenPDAC solver..."
             cd applications/OpenPDAC
-            # ./Allwmake
+            ./Allwmake
             cd ../../applications/utilities/topoGrid
             wmake
           '
