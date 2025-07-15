@@ -25,16 +25,16 @@ Generate videos from OpenFOAM surface outputs.
 parser.add_argument(
     "--interactive",
     action="store_true",
-    help=
-    "Enable interactive view to rotate texture, save camera (for isometric base), and then proceed."
+    help=("Enable interactive view to rotate texture, save camera "
+          "(for isometric base), and then proceed."),
 )
 parser.add_argument(
     "--np",
     "--num_processes",
     type=int,
     default=None,
-    help=
-    f"Number of parallel processes for frame generation (default: {DEFAULT_NUM_PROCESSES} or auto-detected)."
+    help=(f"Number of parallel processes for frame generation "
+          f"(default: {DEFAULT_NUM_PROCESSES} or auto-detected)."),
 )
 parser.add_argument(
     "--fr",
@@ -82,9 +82,8 @@ def read_foam_dict_value(filepath, keyword):
 def key_press_callback_interactive(plotter_instance):
     global continue_animation_flag, user_defined_isometric_base_view
     user_defined_isometric_base_view = plotter_instance.camera_position
-    print(
-        f"User-defined isometric base view saved: {user_defined_isometric_base_view}"
-    )
+    print(f"User-defined isometric base view saved: "
+          f"{user_defined_isometric_base_view}")
     continue_animation_flag = True
     plotter_instance.close()
 
@@ -114,9 +113,8 @@ terrain_mesh = pv.read(TERRAIN_VTK_PATH)
 if not terrain_mesh or terrain_mesh.n_points == 0:
     raise ValueError(
         f"FATAL: Terrain mesh from '{TERRAIN_VTK_PATH}' is empty or invalid.")
-print(
-    f"Terrain mesh loaded. Bounds: {terrain_mesh.bounds}, Center: {terrain_mesh.center}"
-)
+print(f"Terrain mesh loaded. Bounds: {terrain_mesh.bounds}, "
+      f"Center: {terrain_mesh.center}")
 terrain_mesh.compute_normals(auto_orient_normals=True,
                              consistent_normals=True,
                              inplace=True)
@@ -125,16 +123,15 @@ terrain_mesh.texture_map_to_plane(inplace=True)
 texture_exists_globally = os.path.exists(TEXTURE_IMAGE_PATH)  # Flag globale
 terrain_color_fallback = "lightgray"
 # Non carichiamo texture_object globalmente se deve essere passato ai worker
-# Lo caricheremo solo per la visualizzazione interattiva e i worker lo caricheranno da sé.
+# Lo caricheremo solo per la visualizzazione interattiva e i worker lo
+# caricheranno da sé.
 
 if texture_exists_globally:
-    print(
-        f"Texture file '{TEXTURE_IMAGE_PATH}' found. It will be loaded by workers or interactive plotter."
-    )
+    print(f"Texture file '{TEXTURE_IMAGE_PATH}' found. "
+          f"It will be loaded by workers or interactive plotter.")
 else:
-    print(
-        f"Warning: Texture file '{TEXTURE_IMAGE_PATH}' not found. Using solid color."
-    )
+    print(f"Warning: Texture file '{TEXTURE_IMAGE_PATH}' "
+          f"not found. Using solid color.")
 
 texture_rotation_angle_deg = [0]
 texture_flip_x = [False]
@@ -161,7 +158,7 @@ def apply_texture_transformations_to_coords(mesh_with_uvs):
     return mesh_with_uvs
 
 
-if texture_exists_globally:  # Applica trasformazioni UV a terrain_mesh globalmente
+if texture_exists_globally:
     terrain_mesh = apply_texture_transformations_to_coords(terrain_mesh)
 
 # --- Camera Setup Logic ---
@@ -184,7 +181,7 @@ def get_specific_view(mesh, view_type='iso'):
 interactive_texture_object = None  # Solo per la sessione interattiva
 if args.interactive:
     print("\nStarting interactive setup for ISOMETRIC BASE VIEW...")
-    if texture_exists_globally:  # Carica la texture solo per la finestra interattiva
+    if texture_exists_globally:
         interactive_texture_object = pv.read_texture(TEXTURE_IMAGE_PATH)
 
     plotter_interactive = pv.Plotter(window_size=VIDEO_RESOLUTION,
@@ -204,9 +201,8 @@ if args.interactive:
 
     initial_iso_cam = get_specific_view(terrain_mesh, 'iso')
     plotter_interactive.camera_position = initial_iso_cam
-    print(
-        f"Initial camera for interactive mode (default iso): {plotter_interactive.camera_position}"
-    )
+    print(f"Initial camera for interactive mode (default iso): "
+          f"{plotter_interactive.camera_position}")
 
     def cb_rotate_texture_interactive():
         texture_rotation_angle_deg[0] = (texture_rotation_angle_deg[0] +
@@ -254,15 +250,13 @@ if args.interactive:
     plotter_interactive.add_key_event(
         "Return", lambda: key_press_callback_interactive(plotter_interactive))
 
-    print(
-        "  Interactive Window: Adjust ISOMETRIC base view. R:Rotate Txt, X/Y:Flip Txt, Enter:Save Cam, Q:Quit."
-    )
+    print("  Interactive Window: Adjust ISOMETRIC base view. "
+          "R:Rotate Txt, X/Y:Flip Txt, Enter:Save Cam, Q:Quit.")
     plotter_interactive.show(title="Interactive Isometric Base View Setup")
 
     if not continue_animation_flag:
-        print(
-            "Interactive setup exited without saving. Using default calculated isometric base view."
-        )
+        print("Interactive setup exited without saving. "
+              "Using default calculated isometric base view.")
         user_defined_isometric_base_view = get_specific_view(
             terrain_mesh, 'iso')
 
@@ -281,12 +275,10 @@ else:
 print("Calculating top-down view...")
 calculated_top_down_view = get_specific_view(terrain_mesh, 'xy')
 
-print(
-    f"--- User-defined/Default ISOMETRIC BASE view for animations: {user_defined_isometric_base_view} ---"
-)
-print(
-    f"--- Calculated TOP-DOWN view for animations: {calculated_top_down_view} ---"
-)
+print(f"--- User-defined/Default ISOMETRIC BASE view for "
+      f"animations: {user_defined_isometric_base_view} ---")
+print(f"--- Calculated TOP-DOWN view for animations: "
+      f"{calculated_top_down_view} ---")
 
 # ----- PART 2: PREPARING ANIMATION DATA -----
 print("\nLocating VTK files for animation...")
@@ -332,18 +324,12 @@ os.makedirs(OUTPUT_VIDEOS_ROOT_DIR, exist_ok=True)
 # ----- FUNCTION FOR RENDERING A SINGLE FRAME (WORKER) -----
 
 
-def render_single_frame_worker(
-        frame_index,
-        num_total_frames,
-        iso4_filepath,
-        iso6_filepath,
-        current_sim_time,
-        camera_view_for_frame,
-        output_png_filepath,
-        passed_terrain_mesh,  # Questo è il terrain_mesh con le TCoords già trasformate
-        passed_texture_exists_flag,  # Flag per sapere se la texture dovrebbe esistere
-        passed_texture_image_path,  # Percorso del file texture
-        passed_terrain_color):
+def render_single_frame_worker(frame_index, num_total_frames, iso4_filepath,
+                               iso6_filepath, current_sim_time,
+                               camera_view_for_frame, output_png_filepath,
+                               passed_terrain_mesh, passed_texture_exists_flag,
+                               passed_texture_image_path,
+                               passed_terrain_color):
 
     frame_plotter = pv.Plotter(off_screen=True, window_size=VIDEO_RESOLUTION)
     frame_plotter.background_color = BACKGROUND_COLOR
@@ -354,14 +340,14 @@ def render_single_frame_worker(
             worker_texture_object = pv.read_texture(passed_texture_image_path)
         except Exception as e:
             if frame_index == 0:
-                print(
-                    f"[WORKER {os.getpid()}] Error loading texture {passed_texture_image_path} in worker: {e}"
-                )
+                print(f"[WORKER {os.getpid()}] Error loading texture "
+                      f"{passed_texture_image_path} in worker: {e}")
             # Continua senza texture se il caricamento fallisce
-            passed_texture_exists_flag = False  # Sovrascrivi il flag per questo worker
+            passed_texture_exists_flag = False  # Sovrascrivi il flag
 
-    if passed_texture_exists_flag and worker_texture_object and passed_terrain_mesh:
-        # passed_terrain_mesh ha già le coordinate UV corrette
+    if (passed_texture_exists_flag and worker_texture_object
+            and passed_terrain_mesh):
+        # Ora c'è una chiara distinzione visiva tra la condizione e il corpo
         frame_plotter.add_mesh(passed_terrain_mesh,
                                texture=worker_texture_object,
                                smooth_shading=True,
@@ -389,9 +375,8 @@ def render_single_frame_worker(
                                    name="iso6")
     except Exception as e:
         if frame_index == 0:
-            print(
-                f"[WORKER {os.getpid()}] Error loading VTK for {output_png_filepath}: {e}"
-            )
+            print(f"[WORKER {os.getpid()}] Error loading VTK "
+                  f"for {output_png_filepath}: {e}")
 
     frame_plotter.add_text(f"Time: {current_sim_time:.2f}s",
                            font_size=15,
@@ -406,9 +391,8 @@ def render_single_frame_worker(
         frame_plotter.screenshot(output_png_filepath,
                                  transparent_background=False)
     except Exception as e:
-        print(
-            f"[WORKER {os.getpid()}] EXCEPTION during screenshot for {output_png_filepath}: {e}"
-        )
+        print(f"[WORKER {os.getpid()}] EXCEPTION during screenshot "
+              f"for {output_png_filepath}: {e}")
 
     if worker_texture_object:
         del worker_texture_object  # Pulisci texture del worker
@@ -424,9 +408,8 @@ def assemble_video_from_frames(frames_input_dir,
                                video_output_path,
                                framerate_val,
                                delete_frames_after=True):
-    print(
-        f"Assembling video: '{video_output_path}' from '{frames_input_dir}' at {framerate_val} FPS."
-    )
+    print(f"Assembling video: '{video_output_path}' from "
+          f"'{frames_input_dir}' at {framerate_val} FPS.")
     png_filename_pattern = os.path.join(frames_input_dir, "frame_%04d.png")
     ffmpeg_command = [
         'ffmpeg', '-r',
@@ -444,9 +427,8 @@ def assemble_video_from_frames(frames_input_dir,
             shutil.rmtree(frames_input_dir)
             print(f"Directory '{frames_input_dir}' removed.")
     except subprocess.CalledProcessError as e:
-        print(
-            f"ERROR: FFMPEG failed for '{video_output_path}'.\n  Command: {' '.join(e.cmd)}\n  Stderr:\n{e.stderr}"
-        )
+        print(f"ERROR: FFMPEG failed for '{video_output_path}'.\n  "
+              f"Command: {' '.join(e.cmd)}\n  Stderr:\n{e.stderr}")
         print(f"PNG frames preserved in '{frames_input_dir}'.")
     except FileNotFoundError:
         print("ERROR: FFMPEG not found. Ensure it's installed and in PATH.")
@@ -461,9 +443,8 @@ def create_animation_sequence(base_camera_view,
     current_sequence_frames_dir = os.path.join(OUTPUT_FRAMES_ROOT_DIR,
                                                sequence_base_name)
     os.makedirs(current_sequence_frames_dir, exist_ok=True)
-    print(
-        f"\nPreparing frames for sequence: '{sequence_base_name}' in '{current_sequence_frames_dir}'"
-    )
+    print(f"\nPreparing frames for sequence: '{sequence_base_name}' "
+          f"in '{current_sequence_frames_dir}'")
 
     num_animation_frames = len(iso4_vtk_files)
     if num_animation_frames == 0:
@@ -497,23 +478,20 @@ def create_animation_sequence(base_camera_view,
             terrain_color_fallback if not texture_exists_globally else None)
         worker_tasks_list.append(task_arg_tuple)
 
-    print(
-        f"Rendering {num_animation_frames} frames for '{sequence_base_name}' using {NUM_PROCESSES} processes..."
-    )
+    print(f"Rendering {num_animation_frames} frames for "
+          f"'{sequence_base_name}' using {NUM_PROCESSES} processes...")
     rendering_start_time = time.time()
     with Pool(processes=NUM_PROCESSES) as frame_pool:
         results = frame_pool.starmap(render_single_frame_worker,
                                      worker_tasks_list)
     rendering_end_time = time.time()
-    print(
-        f"Frames for '{sequence_base_name}' rendered in {rendering_end_time - rendering_start_time:.2f}s."
-    )
+    print(f"Frames for '{sequence_base_name}' rendered in "
+          f"{rendering_end_time - rendering_start_time:.2f}s.")
 
     rendered_files_count = sum(1 for r in results if r and os.path.exists(r))
     if rendered_files_count != num_animation_frames:
-        print(
-            f"Warning: Expected {num_animation_frames} frames, got {rendered_files_count} for '{sequence_base_name}'."
-        )
+        print(f"Warning: Expected {num_animation_frames} frames, "
+              f"got {rendered_files_count} for '{sequence_base_name}'.")
 
     final_video_output_path = os.path.join(OUTPUT_VIDEOS_ROOT_DIR,
                                            f"{sequence_base_name}.mp4")
@@ -525,12 +503,12 @@ def create_animation_sequence(base_camera_view,
 
 # ----- MAIN EXECUTION SCRIPT -----
 if __name__ == "__main__":
-    print(
-        f"Script started. Using {NUM_PROCESSES} processes for rendering at {FRAMERATE} FPS."
-    )
-    print(
-        f"Video resolution: {VIDEO_RESOLUTION[0]}x{VIDEO_RESOLUTION[1]}, Background: {BACKGROUND_COLOR}"
-    )
+    print(f"Script started. Using {NUM_PROCESSES} processes "
+          f"for rendering at {FRAMERATE} FPS.")
+
+    # Seconda chiamata a print, corretta
+    print(f"Video resolution: {VIDEO_RESOLUTION[0]}x{VIDEO_RESOLUTION[1]}, "
+          f"Background: {BACKGROUND_COLOR}")
 
     if not user_defined_isometric_base_view or not calculated_top_down_view:
         raise RuntimeError(

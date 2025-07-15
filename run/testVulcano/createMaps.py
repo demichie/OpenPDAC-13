@@ -8,12 +8,9 @@ import matplotlib.pyplot as plt
 import shutil
 import os
 import re
-import sys
 import numpy as np
 import pyvista as pv
-import netCDF4 as nc
 from scipy.interpolate import griddata
-import json
 import glob
 import argparse
 from concurrent.futures import ProcessPoolExecutor
@@ -25,14 +22,36 @@ os.environ["MKL_NUM_THREADS"] = "1"
 
 
 def parse_arguments():
-    parser = argparse.ArgumentParser(description="Process VTK data into raster maps.")
-    parser.add_argument("--lx", type=float, default=None, help="Lower-left x-coordinate of the grid (optional).")
-    parser.add_argument("--ly", type=float, default=None, help="Lower-left y-coordinate of the grid (optional).")
-    parser.add_argument("--res", type=float, default=None, help="Grid resolution (optional).")
-    parser.add_argument("--nrows", type=int, default=None, help="Number of rows in the output grid (optional).")
-    parser.add_argument("--ncols", type=int, default=None, help="Number of columns in the output grid (optional).")
-    parser.add_argument("-np", type=int, default=1, help="Number of processes to use for parallel execution.")
+    parser = argparse.ArgumentParser(
+        description="Process VTK data into raster maps.")
+    parser.add_argument("--lx",
+                        type=float,
+                        default=None,
+                        help="Lower-left x-coordinate of the grid (optional).")
+    parser.add_argument("--ly",
+                        type=float,
+                        default=None,
+                        help="Lower-left y-coordinate of the grid (optional).")
+    parser.add_argument("--res",
+                        type=float,
+                        default=None,
+                        help="Grid resolution (optional).")
+    parser.add_argument("--nrows",
+                        type=int,
+                        default=None,
+                        help="Number of rows in the output grid (optional).")
+    parser.add_argument(
+        "--ncols",
+        type=int,
+        default=None,
+        help="Number of columns in the output grid (optional).")
+    parser.add_argument(
+        "-np",
+        type=int,
+        default=1,
+        help="Number of processes to use for parallel execution.")
     return parser.parse_args()
+
 
 def validate_args(args):
     # Verifica solo i parametri relativi alla griglia, ignora --np
@@ -55,14 +74,12 @@ def validate_args(args):
     if all(provided.values()):
         return "full"  # caso 3: tutti i parametri forniti
 
-    raise ValueError(
-        "Invalid combination of grid arguments.\n"
-        "Accepted usage:\n"
-        "1. No grid arguments\n"
-        "2. Only --res\n"
-        "3. All of --lx, --ly, --res, --nrows, --ncols\n"
-        "(--np is always optional)"
-    )
+    raise ValueError("Invalid combination of grid arguments.\n"
+                     "Accepted usage:\n"
+                     "1. No grid arguments\n"
+                     "2. Only --res\n"
+                     "3. All of --lx, --ly, --res, --nrows, --ncols\n"
+                     "(--np is always optional)")
 
 
 # Function to extract floating point number from directory name
@@ -232,19 +249,20 @@ def vtk_to_grid(filename, xVent, yVent, grid_x, grid_y):
 
     return data
 
+
 def process_single_vtk(var_args, fixed_args):
 
-    (xVent, yVent, grid_x, grid_y,output_root, extent_map, xi, yi, Zinit, extent, cell) = fixed_args
+    (xVent, yVent, grid_x, grid_y, output_root, extent_map, xi, yi, Zinit,
+     extent, cell) = fixed_args
     (i, time_val, filename, surface) = var_args
 
-    print('filename',filename)
+    print('filename', filename)
     data = vtk_to_grid(filename, xVent, yVent, grid_x, grid_y)
-    
+
     time_folder = os.path.join(output_root, f"{time_val:.6g}", surface)
     os.makedirs(time_folder, exist_ok=True)
 
     levels = np.linspace(-6.0, -0.5, 12)
-    label_str = 'Log particles volume fraction'
 
     cmap = plt.get_cmap('viridis')
     norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
@@ -255,41 +273,45 @@ def process_single_vtk(var_args, fixed_args):
 
             with np.errstate(divide='ignore', invalid='ignore'):
                 val_plot = np.flipud(np.log10(grid))
-                
+
             val_plot[val_plot < -6.0] = np.nan
 
             fig, ax = plt.subplots()
 
             ls = LightSource(azdeg=315, altdeg=45)
 
-            ax.imshow(ls.hillshade(np.flipud(Zinit), vert_exag=1.0, dx=cell, dy=cell),
+            ax.imshow(ls.hillshade(np.flipud(Zinit),
+                                   vert_exag=1.0,
+                                   dx=cell,
+                                   dy=cell),
                       cmap='gray',
                       extent=extent)
 
             ax.set_aspect('equal', 'box')
 
             p1 = ax.imshow(val_plot,
-                   cmap=cmap,
-                   norm=norm,
-                   interpolation='nearest',
-                   extent=extent_map,
-                   alpha=0.5)
+                           cmap=cmap,
+                           norm=norm,
+                           interpolation='nearest',
+                           extent=extent_map,
+                           alpha=0.5)
             clb = plt.colorbar(p1)
             clb.set_label('Log10 of Volume fraction',
-                  labelpad=5,
-                  y=0.5,
-                  rotation=90)
+                          labelpad=5,
+                          y=0.5,
+                          rotation=90)
 
             png_path = os.path.join(time_folder, f"{var_name}.png")
-            print('Saving',png_path)
+            print('Saving', png_path)
             plt.savefig(png_path, dpi=200)
             plt.close(fig)
 
             asc_path = os.path.join(time_folder, f"{var_name}.asc")
-            print('Saving',asc_path)
+            print('Saving', asc_path)
             save_ascii_grid(grid, xi, yi, asc_path)
 
     return i
+
 
 def readASC(DEM_file):
 
@@ -344,7 +366,8 @@ def save_ascii_grid(data, xi, yi, filepath):
             f.write(" ".join(f"{v:.6f}" if np.isfinite(v) else f"{nodata}"
                              for v in row) + "\n")
 
-def main(args,mode):
+
+def main(args, mode):
 
     write_interval, surfaces, _ = read_dict("system/sampleSurfaceAlpha")
     xVent, yVent, DEMfile = read_topoGridDict("system/topoGridDict")
@@ -361,36 +384,38 @@ def main(args,mode):
 
     mesh = pv.read(vtk_files[0])
     points = mesh.points[:, :2] + np.array([xVent, yVent])
-        
+
     nalpha = 0
     alphalist = []
     for name in mesh.array_names:
         if 'alpha' in name:
-            nalpha +=1
+            nalpha += 1
             alphalist.append(name)
 
     if mode == "full":
-   
+
         print("Running with parameters:")
-        print(f"lx={args.lx}, ly={args.ly}, res={args.res}, nrows={args.nrows}, ncols={args.ncols}, np={args.np}")
+        print(
+            f"lx={args.lx}, ly={args.ly}, res={args.res}, "
+            f"nrows={args.nrows}, ncols={args.ncols}, np={args.np}"
+        )
 
         lxOut = args.lx
         lyOut = args.ly
         resolutionOut = args.res
         nrowsOut = args.nrows
         ncolsOut = args.ncols
-        nproc = args.np
 
-        xmin = lxOut + 0.5*resolutionOut
-        xmax = lxOut + (ncolsOut-0.5)*resolutionOut
-        ymin = lyOut + 0.5*resolutionOut
-        ymax = lyOut + (nrowsOut-0.5)*resolutionOut
+        xmin = lxOut + 0.5 * resolutionOut
+        xmax = lxOut + (ncolsOut - 0.5) * resolutionOut
+        ymin = lyOut + 0.5 * resolutionOut
+        ymax = lyOut + (nrowsOut - 0.5) * resolutionOut
 
         xi = np.linspace(xmin, xmax, ncolsOut)
         yi = np.linspace(ymin, ymax, nrowsOut)
         grid_x, grid_y = np.meshgrid(xi, yi)
         extent_map = xi[0]-0.5*resolutionOut, xi[-1]+0.5*resolutionOut, \
-                yi[0]-0.5*resolutionOut, yi[-1]+0.5*resolutionOut
+            yi[0]-0.5*resolutionOut, yi[-1]+0.5*resolutionOut
 
     else:
 
@@ -399,7 +424,6 @@ def main(args,mode):
             resolutionOut = 20
         elif mode == "res_only":
             resolutionOut = args.res
-
 
         xmin, ymin = points.min(axis=0)
         xmax, ymax = points.max(axis=0)
@@ -411,11 +435,9 @@ def main(args,mode):
         extent_map = xi[0]-0.5*resolutionOut, xi[-1]+0.5*resolutionOut, \
             yi[0]-0.5*resolutionOut, yi[-1]+0.5*resolutionOut
 
-
-    alphaMax = np.zeros((nrowsOut,ncolsOut))
+    alphaMax = np.zeros((nrowsOut, ncolsOut))
 
     levels = np.linspace(-6.0, -0.5, 12)
-    label_str = 'Log particles volume fraction'
 
     cmap = plt.get_cmap('viridis')
     norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
@@ -423,15 +445,12 @@ def main(args,mode):
     output_root = "postProcessing/raster_maps/flow/"
     os.makedirs(output_root, exist_ok=True)
 
-    metadata = {}
-    counter = 0
-
     print('surfaces', surfaces)
 
-    fixed_args = (xVent, yVent, grid_x, grid_y,output_root, extent_map, xi, yi, Zinit, extent, cell)
+    fixed_args = (xVent, yVent, grid_x, grid_y, output_root, extent_map, xi,
+                  yi, Zinit, extent, cell)
 
     for surface in surfaces:
-
         """
         nc_path = os.path.join(output_root, f"{surface}.nc")
         ncfile = nc.Dataset(nc_path, "w", format="NETCDF4")
@@ -441,23 +460,27 @@ def main(args,mode):
         data_collections = {}
         """
 
-        var_args_list = [(i, times[i], filename,surface) for i, filename in enumerate(vtk_files)]
+        var_args_list = [(i, times[i], filename, surface)
+                         for i, filename in enumerate(vtk_files)]
 
         with ProcessPoolExecutor(max_workers=args.np) as executor:
-            results = list(executor.map(partial(process_single_vtk, fixed_args=fixed_args), var_args_list))
-
+            _ = list(
+                executor.map(
+                    partial(process_single_vtk, fixed_args=fixed_args),
+                    var_args_list))
 
         for i, var_name in enumerate(alphalist):
-                
+
             for j, filename in enumerate(vtk_files):
-        
+
                 time_val = times[j]
-                time_folder = os.path.join(output_root, f"{time_val:.6g}", surface)
+                time_folder = os.path.join(output_root, f"{time_val:.6g}",
+                                           surface)
                 asc_path = os.path.join(time_folder, f"{var_name}.asc")
-                print('Reading',asc_path)
+                print('Reading', asc_path)
                 _, _, alpha_val, _, _ = readASC(asc_path)
-                alphaMax = np.maximum(alphaMax,alpha_val)     
- 
+                alphaMax = np.maximum(alphaMax, alpha_val)
+
             with np.errstate(divide='ignore', invalid='ignore'):
                 val_plot = np.flipud(np.log10(alphaMax))
             val_plot[val_plot < -6.0] = np.nan
@@ -466,101 +489,41 @@ def main(args,mode):
 
             ls = LightSource(azdeg=315, altdeg=45)
 
-            ax.imshow(ls.hillshade(np.flipud(Zinit), vert_exag=1.0, dx=cell, dy=cell),
+            ax.imshow(ls.hillshade(np.flipud(Zinit),
+                                   vert_exag=1.0,
+                                   dx=cell,
+                                   dy=cell),
                       cmap='gray',
                       extent=extent)
 
             ax.set_aspect('equal', 'box')
 
             p1 = ax.imshow(val_plot,
-                   cmap=cmap,
-                   norm=norm,
-                   interpolation='nearest',
-                   extent=extent_map,
-                   alpha=0.5)
+                           cmap=cmap,
+                           norm=norm,
+                           interpolation='nearest',
+                           extent=extent_map,
+                           alpha=0.5)
             clb = plt.colorbar(p1)
             clb.set_label('Log10 of Volume fraction',
-                  labelpad=5,
-                  y=0.5,
-                  rotation=90)
+                          labelpad=5,
+                          y=0.5,
+                          rotation=90)
 
             max_folder = os.path.join(output_root, surface)
 
             os.makedirs(max_folder, exist_ok=True)
 
             png_path = os.path.join(max_folder, f"{var_name}_max.png")
-            print('Saving',png_path)
+            print('Saving', png_path)
             plt.savefig(png_path, dpi=200)
             plt.close(fig)
 
             asc_path = os.path.join(max_folder, f"{var_name}_max.asc")
-            print('Saving',asc_path)
+            print('Saving', asc_path)
             save_ascii_grid(alphaMax, xi, yi, asc_path)
 
-            plt.show()        
-        
-        """   
-        ncfile.createDimension("y", len(yi))
-        ncfile.createDimension("x", len(xi))
-        ncfile.createVariable("time", "f4", ("time", ))[:] = times
-        ncfile.createVariable("x", "f4", ("x", ))[:] = xi
-        ncfile.createVariable("y", "f4", ("y", ))[:] = yi
-
-        # alphaMax = np.max(...
-
-        for ialpha in range(nalpha):
-
-            var_name = alphalist[ialpha]
-
-            for i, filename in enumerate(vtk_files):
-
-                print(filename)
-                time_val = times[i]
-
-                time_folder = os.path.join(output_root, f"{time_val:.6g}", surface)
-                os.makedirs(time_folder, exist_ok=True)
-
-                grid = gridAll[:,:,ialpha,i]
-                print(var_name)
-
-                val_plot = np.flipud(np.log10(grid))
-                val_plot[val_plot < -6.0] = np.nan
-
-                if counter == 0:
-
-                    p1 = ax.imshow(val_plot,
-                                   cmap=cmap,
-                                   norm=norm,
-                                   interpolation='nearest',
-                                   extent=extent_map,
-                                   alpha=0.5)
-                    clb = plt.colorbar(p1)
-
-                    label_str = 'Log10 of Volume fraction'
-                    clb.set_label(label_str,
-                                  labelpad=5,
-                                  y=0.5,
-                                  rotation=90)
-
-                else:
-
-                    p1.set_data(val_plot)
-
-                png_path = os.path.join(time_folder, f"{var_name}.png")
-                print(png_path)
-
-                plt.savefig(png_path, dpi=200)
-                counter += 1
-
-                asc_path = os.path.join(time_folder, f"{var_name}.asc")
-                save_ascii_grid(grid, xi, yi, asc_path)
-
-        """
-
-        # ncfile.close()
-
-    #with open(os.path.join(output_root, "metadata.json"), "w") as f:
-    #     json.dump(metadata, f, indent=2)
+            plt.show()
 
 
 if __name__ == "__main__":

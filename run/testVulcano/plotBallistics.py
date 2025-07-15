@@ -81,12 +81,10 @@ def readASC(DEM_file_path):  # Renamed variable for clarity
         np.linspace(0, (rows - 1) * cell_size_dem, rows)
     dem_extent = lx, lx + cols * cell_size_dem, ly, ly + rows * cell_size_dem
 
-    DEM_data = pd.read_table(
-        DEM_file_path,
-        sep=r'\s+',
-        header=None,
-        skiprows=6
-    ).astype(float).values
+    DEM_data = pd.read_table(DEM_file_path,
+                             sep=r'\s+',
+                             header=None,
+                             skiprows=6).astype(float).values
 
     DEM_data = np.flipud(DEM_data)
     # Assuming 0 is a safe fill value for NODATA in DEM for hillshade
@@ -125,11 +123,8 @@ def read_topoGridDict(filepath):
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
-        description=(
-            "Process OpenFOAM Lagrangian particle data to create "
-            "ballistic impact maps."
-        )
-    )
+        description=("Process OpenFOAM Lagrangian particle data to create "
+                     "ballistic impact maps."))
     parser.add_argument(
         "--lx",
         type=float,
@@ -186,8 +181,7 @@ def validate_args(args):
         "2. Only --res: Grid extents derived from DEM, resolution from "
         "--res.\n"
         "3. All of --lx, --ly, --res, --nrows, --ncols: "
-        "Fully user-defined grid.\n"
-    )
+        "Fully user-defined grid.\n")
     # Using sys.exit(error_message) or parser.error(error_message) might
     # be cleaner but for now, a raised ValueError is fine.
     # To use parser.error, parse_arguments would need the parser instance.
@@ -243,11 +237,9 @@ def main():
     except ValueError as e:
         print(f"Error extracting timesteps from file paths. "
               f"Example file: {cloud_files[0]}")
-        print(
-            f"Ensure files are in directories like "
-            f"'postProcessing/cloudInfo1/NUMERICAL_TIMESTEP/output.csv'. "
-            f"Error: {e}"
-        )
+        print(f"Ensure files are in directories like "
+              f"'postProcessing/cloudInfo1/NUMERICAL_TIMESTEP/output.csv'. "
+              f"Error: {e}")
         return
 
     timevals = np.array(timesteps)
@@ -288,10 +280,8 @@ def main():
     }
 
     nballistics_global = len(unique_global_particle_identifiers)
-    print(
-        f"Total unique particles found (nballistics_global): "
-        f"{nballistics_global}"
-    )
+    print(f"Total unique particles found (nballistics_global): "
+          f"{nballistics_global}")
 
     if nballistics_global == 0:
         print("No particles found in any file. Exiting.")
@@ -463,20 +453,16 @@ def main():
         & (impact_properties_matrix[:, 3] > 0)]
 
     if filtered_impact_data.shape[0] == 0:
-        print(
-            "No particles impacted according to criteria. "
-            "Cannot generate raster maps."
-        )
+        print("No particles impacted according to criteria. "
+              "Cannot generate raster maps.")
     else:
         # (la logica per x_impact_coords, y_impact_coords, diam_impacted
         # e la definizione della griglia rimane invariata)
         # (grid definition logic: map_x_ll, map_y_ll, current_map_res, etc.)
         # (particle binning logic: count_ballistic_class)
 
-        print(
-            f"Number of impacted particles for mapping:"
-            f"{filtered_impact_data.shape[0]}"
-        )
+        print(f"Number of impacted particles for mapping:"
+              f"{filtered_impact_data.shape[0]}")
         x_impact_coords = filtered_impact_data[:, 4]
         y_impact_coords = filtered_impact_data[:, 5]
         diam_impacted = filtered_impact_data[:, 1]
