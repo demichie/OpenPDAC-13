@@ -5,6 +5,7 @@ from scipy.spatial import Delaunay
 from stl import mesh
 import sys
 import os.path
+import shutil
 
 from scipy.interpolate import RegularGridInterpolator
 
@@ -99,6 +100,39 @@ def saveDicts(xmin, xmax, ymin, ymax, zmin, zmax, offset_mesh, path):
 
     # Write blockMeshDict dictionary by concatenating the header with the other
     # parts. Save it as path/system/blockMeshDict
+
+    system_dir_path = os.path.join(path, 'system')
+    blockmesh_file_path = os.path.join(system_dir_path, 'blockMeshDict')
+
+    os.makedirs(system_dir_path, exist_ok=True)
+
+    source_files = [
+        'templates/blockMesh.start', 'blockMesh.mod', 'templates/blockMesh.end'
+    ]
+
+    try:
+        with open(blockmesh_file_path, 'wb') as outfile:  # 'wb' = Write Bytes
+            for source_file_name in source_files:
+                try:
+                    with open(source_file_name,
+                              'rb') as infile:  # 'rb' = Read Bytes
+                        shutil.copyfileobj(infile, outfile)
+                except FileNotFoundError:
+                    print(f"ATTENZIONE: Il file sorgente '{source_file_name}' "
+                          f"non è stato trovato e sarà saltato.")
+
+        print(f"File '{blockmesh_file_path}' creato/aggiornato con successo.")
+
+    except IOError as e:
+        print(f"Errore di I/O durante la scrittura del file "
+              f"'{blockmesh_file_path}': {e}")
+
+    try:
+        os.remove('blockMesh.mod')
+        print("File temporaneo 'blockMesh.mod' rimosso.")
+    except OSError as e:
+        print(f"Errore durante la rimozione del file 'blockMesh.mod': {e}")
+    """
     path_system = path + 'system/'
     command = (
         "cat templates/blockMesh.start blockMesh.mod "
@@ -110,8 +144,9 @@ def saveDicts(xmin, xmax, ymin, ymax, zmin, zmax, offset_mesh, path):
     # Call the operating system to execute the specified commands
     os.system(command)
     os.system('rm blockMesh.mod')
+    """
 
-    fout = open((path_system + 'snappyHexMeshDict'), 'w')
+    fout = open((system_dir_path + 'snappyHexMeshDict'), 'w')
     with open('./templates/snappyHexMeshDict.template') as f:
         content = f.readlines()
         textdata = [x.strip() for x in content]
