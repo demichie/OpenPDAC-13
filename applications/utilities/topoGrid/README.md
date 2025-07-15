@@ -1,18 +1,27 @@
 # Mesh Deformation Procedure in **topoGridNew**
 
-The **topoGridNew** utility deforms the computational mesh to conform to a given topography. The process uses a combination of bilinear interpolation, inverse distance weighting (IDW), and blending techniques to compute vertical displacements and areas. The deformation accounts for contributions from the base ($z = 0$) and the top boundary to compute the deformation at the internal points of the mesh.
+The **topoGridNew** utility deforms the computational mesh to conform to a
+given topography. The process uses a combination of bilinear interpolation,
+inverse distance weighting (IDW), and blending techniques to compute vertical
+displacements and areas. The deformation accounts for contributions from the
+base ($z = 0$) and the top boundary to compute the deformation at the internal
+points of the mesh.
 
 ______________________________________________________________________
 
 ## 1. Bilinear Interpolation for Face Centers with $z = 0$
 
-- **Objective**: Compute vertical displacements ($\\Delta z$) and areas for the centers of mesh faces located at $z = 0$, based on the input topography.
+- **Objective**: Compute vertical displacements ($\\Delta z$) and areas for
+the centers of mesh faces located at $z = 0$, based on the input topography.
 
 - **Procedure**:
 
-  1. The $x, y$ coordinates of each face center are mapped to the corresponding cell in the input topography grid.
+  1. The $x, y$ coordinates of each face center are mapped to the
+  corresponding cell in the input topography grid.
 
-  1. **Bilinear interpolation** is performed using the four surrounding grid nodes ($v\_{00}, v\_{01}, v\_{10}, v\_{11}$) to estimate the interpolated elevation ($z\_{\\text{interpolated}}$):
+  1. **Bilinear interpolation** is performed using the four surrounding grid
+  nodes ($v\_{00}, v\_{01}, v\_{10}, v\_{11}$) to estimate the interpolated
+  elevation ($z\_{\\text{interpolated}}$):
 
      $$z\_{\\text{interpolated}} = v\_{00}(1 - x\_{\\text{lerp}})(1 - y\_{\\text{lerp}})
      \+ v\_{01}x\_{\\text{lerp}}(1 - y\_{\\text{lerp}})
@@ -25,7 +34,8 @@ ______________________________________________________________________
      $$\\Delta z\_{\\text{face}} = z\_{\\text{interpolated}} - z\_{\\text{original}}
      $$
 
-  1. The area of each face ($\\text{Area}\_{\\text{face}}$) is computed based on its geometry and stored for later weighting.
+  1. The area of each face ($\\text{Area}\_{\\text{face}}$) is computed based
+  on its geometry and stored for later weighting.
 
 - **Output**:
 
@@ -48,7 +58,7 @@ ______________________________________________________________________
      $$d\_{\\text{threshold}} = \\text{interpRelRadius} \\cdot d\_{\\text{min}}
      $$
 
-     - $\\text{interpRelRadius}$: A user-defined multiplier (default = 4).
+     $\\text{interpRelRadius}$: A user-defined multiplier (default = 4).
 
   1. Include only face centers within $d\_{\\text{threshold}}$ in the summation.
 
