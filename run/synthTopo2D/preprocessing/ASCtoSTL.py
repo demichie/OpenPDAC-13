@@ -3,20 +3,11 @@ from shapely.affinity import translate
 import numpy as np
 from scipy.spatial import Delaunay
 from stl import mesh
-from scipy import interpolate
-from linecache import getline
 import sys
 import os.path
-import time
-import pandas as pd
-
-import skimage.filters.rank
-import skimage.morphology
-import skimage.io
-
-import struct
 
 from scipy.interpolate import RegularGridInterpolator
+
 
 def save_stl(vertices, filename):
     # Apri il file in modalità scrittura
@@ -31,6 +22,7 @@ def save_stl(vertices, filename):
         # Scrivi la chiusura del file STL
         f.write('endsolid surface\n')
 
+
 def write_triangle(f, vertices):
     # Calcola la normale del triangolo
     normal = calculate_normal(vertices)
@@ -39,16 +31,25 @@ def write_triangle(f, vertices):
     f.write('facet normal {} {} {}\n'.format(normal[0], normal[1], normal[2]))
     f.write('\touter loop\n')
     for vertex in vertices:
-        f.write('\t\tvertex {} {} {}\n'.format(vertex[0], vertex[1], vertex[2]))
+        f.write('\t\tvertex {} {} {}\n'.format(vertex[0], vertex[1],
+                                               vertex[2]))
     f.write('\tendloop\n')
     f.write('endfacet\n')
 
+
 def calculate_normal(vertices):
     # Calcola il vettore normale usando il prodotto vettoriale
-    v1 = [vertices[1][0] - vertices[0][0], vertices[1][1] - vertices[0][1], vertices[1][2] - vertices[0][2]]
-    v2 = [vertices[2][0] - vertices[0][0], vertices[2][1] - vertices[0][1], vertices[2][2] - vertices[0][2]]
+    v1 = [
+        vertices[1][0] - vertices[0][0], vertices[1][1] - vertices[0][1],
+        vertices[1][2] - vertices[0][2]
+    ]
+    v2 = [
+        vertices[2][0] - vertices[0][0], vertices[2][1] - vertices[0][1],
+        vertices[2][2] - vertices[0][2]
+    ]
     normal = cross_product(v1, v2)
     return normal
+
 
 def cross_product(v1, v2):
     # Calcola il prodotto vettoriale tra due vettori
@@ -56,7 +57,8 @@ def cross_product(v1, v2):
     cross_y = v1[2] * v2[0] - v1[0] * v2[2]
     cross_z = v1[0] * v2[1] - v1[1] * v2[0]
     return [cross_x, cross_y, cross_z]
-    
+
+
 def saveDicts(xmin, xmax, ymin, ymax, zmin, zmax, offset_mesh, path):
 
     try:
@@ -98,8 +100,12 @@ def saveDicts(xmin, xmax, ymin, ymax, zmin, zmax, offset_mesh, path):
     # Write blockMeshDict dictionary by concatenating the header with the other
     # parts. Save it as path/system/blockMeshDict
     path_system = path + 'system/'
-    command = "cat templates/blockMesh.start blockMesh.mod templates/blockMesh.end > " + \
-        path_system + "blockMeshDict"
+    command = (
+        "cat templates/blockMesh.start blockMesh.mod "
+        + "templates/blockMesh.end > "
+        + path_system
+        + "blockMeshDict"
+    )
 
     # Call the operating system to execute the specified commands
     os.system(command)
@@ -132,7 +138,7 @@ def printProgressBar(iteration,
         total       - Required  : total iterations (Int)
         prefix      - Optional  : prefix string (Str)
         suffix      - Optional  : suffix string (Str)
-        decimals    - Optional  : positive number of decimals in percent complete (Int)
+        decimals    - Optional  : number of decimals in percent complete (Int)
         bar_length  - Optional  : character length of bar (Int)
     """
     str_format = "{0:." + str(decimals) + "f}"
@@ -155,9 +161,9 @@ def main(argv):
     lx = -500
     ly = -500
     cell = 2
-    nd = -9999
+    # nd = -9999
 
-    DEM = np.zeros((cols,rows))+100.0
+    DEM = np.zeros((cols, rows)) + 100.0
 
     # values are associated to the centers of the DEM pixels
     xs_DEM = lx + 0.5 * cell + np.linspace(0, (cols - 1) * cell, cols)
@@ -234,21 +240,14 @@ def main(argv):
         print('Missing parameter in dict: z_atm (float)')
         sys.exit(1)
 
-
-
     zmin = np.min(np.min(Zinit)) - offset_mesh
     zmax = np.max(np.max(Zinit)) + z_atm
 
     # Definisci i quattro vertici del rettangolo
-    v1 = np.array([np.amin(xinit), 0, zmin-offset_mesh])
-    v2 = np.array([np.amax(xinit), 0, zmin-offset_mesh])
-    v3 = np.array([np.amax(xinit), 0, zmax+offset_mesh])
-    v4 = np.array([np.amin(xinit), 0, zmax+offset_mesh])
-
-    print('v1',v1)
-    print('v2',v2)
-    print('v3',v3)
-    print('v4',v4)
+    v1 = np.array([np.amin(xinit), 0, zmin - offset_mesh])
+    v2 = np.array([np.amax(xinit), 0, zmin - offset_mesh])
+    v3 = np.array([np.amax(xinit), 0, zmax + offset_mesh])
+    v4 = np.array([np.amin(xinit), 0, zmax + offset_mesh])
 
     # Crea la lista dei vertici
     vertices = [v1, v2, v3, v4]
@@ -351,11 +350,11 @@ def main(argv):
         dist_flat = 0
 
     if dist_flat >= dist0:
-    
+
         print('dist_flat should be < dist0')
         print('Set to default value: dist_flat=0')
         dist_flat = 0
-            
+
     try:
 
         from ASCtoSTLdict import nlevels
@@ -461,7 +460,6 @@ def main(argv):
                              decimals=1,
                              bar_length=50)
             """
-            
             dist = line.distance(Point(x, y))
 
             # distance of point (x,y) from line
@@ -520,7 +518,7 @@ def main(argv):
 
     i = 0
 
-    Inside_1d = np.zeros_like(X1_1d, dtype=np.uint8)
+    Inside_1d = np.zeros_like(X1_1d, dtype=bool)
 
     # refinement for the level corresponding to the crater
     for j, (x, y) in enumerate(zip(X1_1d, Y1_1d)):
@@ -534,13 +532,6 @@ def main(argv):
 
     Inside = np.reshape(Inside_1d, X1.shape)
 
-    # define "next to" - this may be a square, diamond, etc
-    selem = skimage.morphology.disk(1)
-
-    # create masks for the two kinds of edges
-    Inside_edges = (skimage.filters.rank.minimum(Inside, selem) == 0) & (
-        skimage.filters.rank.maximum(Inside, selem) == 255)
-
     shift = 1
     edgex1 = Inside & (np.roll(~Inside, shift=shift, axis=0)
                        | np.roll(~Inside, shift=-shift, axis=0))
@@ -548,10 +539,8 @@ def main(argv):
                        | np.roll(~Inside, shift=-shift, axis=1))
     edge = edgex1 | edgey1
 
-    print(np.sum(edge))
-
-    xedge = X1[edge == True].reshape(-1, 1)
-    yedge = Y1[edge == True].reshape(-1, 1)
+    xedge = X1[edge].reshape(-1, 1)
+    yedge = Y1[edge].reshape(-1, 1)
 
     zedge = np.zeros_like(xedge)
 
@@ -559,7 +548,6 @@ def main(argv):
 
         zedge[j] = f((y, x))
 
-    print(zedge.shape)
     xy = np.concatenate([xedge, yedge], axis=1)
 
     from scipy.interpolate import RBFInterpolator
@@ -606,7 +594,7 @@ def main(argv):
 
     # interpolation for the level corresponding to the crater
     for j, (x, y) in enumerate(zip(X1_1d, Y1_1d)):
-        """    
+        """
         printProgressBar(np.asarray(i) + 1,
                          nxy,
                          prefix='Progress:',
@@ -637,8 +625,9 @@ def main(argv):
             sys.exit(1)
 
         if (dist < dist_lev):
-        
-            dz_rel = -(1.0 - (np.maximum(0,dist-dist_flat) / (dist0-dist_flat))**enne)**(1.0 / enne)
+
+            dz_rel = -(1.0 - (np.maximum(0, dist - dist_flat) /
+                              (dist0 - dist_flat))**enne)**(1.0 / enne)
 
             if (conduit_radius > 0) and (dist <=
                                          conduit_radius + conduit_buffer):
@@ -650,10 +639,10 @@ def main(argv):
                 conduit_dz_rel = alpha_buffer * conduit_length / depth
                 dz_rel -= conduit_dz_rel
                 conduit_volume += depth * conduit_dz_rel
-                
+
             else:
-            
-                conduit_dz_rel = 0.0    
+
+                conduit_dz_rel = 0.0
 
             dx.append(dz_rel * xb)
             dy.append(dz_rel * yb)
@@ -686,16 +675,15 @@ def main(argv):
 
                 RBF_interpolation = False
 
-            z_org = f((y, x))
+            z_org = f((y, x)).item()
 
             if RBF_interpolation:
 
-                z = rbf([[x, y]])
+                z = rbf([[x, y]]).item()
 
             else:
-            
-                z = z_org
 
+                z = z_org
 
             if (conduit_radius > 0) and (dist <=
                                          conduit_radius + conduit_buffer):
@@ -704,7 +692,7 @@ def main(argv):
                 y_conduit_top.append(y + yb)
                 z_conduit_top.append(
                     float(z) + depth * (dz_rel + conduit_dz_rel))
-                    
+
                 x_conduit_bottom.append(x + dz_rel * xb)
                 y_conduit_bottom.append(y + dz_rel * yb)
                 z_conduit_bottom.append(float(z) + depth * dz_rel)
@@ -731,8 +719,6 @@ def main(argv):
     z_new2 = np.array(z_check) + np.array(dz2)
     z_new_crater = np.array(z_check) + np.array(dz_crater)
 
-
-
     points = []
 
     for i, (x, y) in enumerate(zip(x_check, y_check)):
@@ -754,31 +740,28 @@ def main(argv):
 
     tri_simpl = tri.simplices.copy()
 
-    
     vert = range(n_out, len(x_check))
 
     # check if the points are in triangles (at least one vertex)
-    inner_tri_list = np.in1d(tri_simpl[:, 0], vert)
+    inner_tri_list = np.isin(tri_simpl[:, 0], vert)
     inner_tri_list = np.logical_or(inner_tri_list,
-                                   np.in1d(tri_simpl[:, 1], vert))
+                                   np.isin(tri_simpl[:, 1], vert))
     inner_tri_list = np.logical_or(inner_tri_list,
-                                   np.in1d(tri_simpl[:, 2], vert))
+                                   np.isin(tri_simpl[:, 2], vert))
 
     inner_tri_list = np.arange(tri_simpl.shape[0])[inner_tri_list]
 
     tri_lagr = tri_simpl[inner_tri_list, :]
-       
-    # list of indexes of points outside crater area 
+
+    # list of indexes of points outside crater area
     points_out = list(range(n_out))
-    
-    
 
     # check if the points are in triangles (at least one vertex)
-    outer_tri_list = np.in1d(tri_simpl[:, 0], points_out)
+    outer_tri_list = np.isin(tri_simpl[:, 0], points_out)
     outer_tri_list = np.logical_or(outer_tri_list,
-                                   np.in1d(tri_simpl[:, 1], points_out))
+                                   np.isin(tri_simpl[:, 1], points_out))
     outer_tri_list = np.logical_or(outer_tri_list,
-                                   np.in1d(tri_simpl[:, 2], points_out))
+                                   np.isin(tri_simpl[:, 2], points_out))
 
     outer_tri_list = list(np.arange(tri_simpl.shape[0])[outer_tri_list])
 
@@ -787,15 +770,14 @@ def main(argv):
     tri_out = tri_simpl[outer_tri_list, :]
 
     tri_in = tri_simpl[inner_tri_list, :]
-    
+
     # list of points belonging to inner triangles
     tri_in1D = list(np.unique(tri_in.ravel()))
     # list of points belonginh to outer triangles
     tri_out1D = list(np.unique(tri_out.ravel()))
-    
+
     # points belonging to both lists (crater area boundary points)
     edge_points = list(set(tri_in1D) & set(tri_out1D))
-
 
     try:
 
@@ -819,31 +801,30 @@ def main(argv):
             dz_crater[i] = 0.0
 
         else:
-        
+
             z_new[i] = z_org[i]
             dz_total[i] = 0.0
 
             z_new_crater[i] = z_org[i]
             dz_crater[i] = 0.0
-        
 
+    triangles_to_move = []
     for i in inner_tri_list:
-    
-        dz_tri = dz_total[int(tri_simpl[i,0])]
-        dz_tri += dz_total[int(tri_simpl[i,1])]
-        dz_tri += dz_total[int(tri_simpl[i,2])]
-        
+
+        dz_tri = dz_total[int(tri_simpl[i, 0])]
+        dz_tri += dz_total[int(tri_simpl[i, 1])]
+        dz_tri += dz_total[int(tri_simpl[i, 2])]
+
         if dz_tri >= -0.001:
-        
-            inner_tri_list.remove(i)
-            outer_tri_list.append(i)
-        
-            
+            triangles_to_move.append(i)
 
-    tri_in = tri_simpl[inner_tri_list, :]    
+    # Now, safely modify the lists
+    for i in triangles_to_move:
+        inner_tri_list.remove(i)
+        outer_tri_list.append(i)
+
+    tri_in = tri_simpl[inner_tri_list, :]
     tri_out = tri_simpl[outer_tri_list, :]
-
-
 
     if top_smooth_flag:
         vertices_org = np.column_stack((x_org, y_org, z_smooth))
@@ -900,7 +881,6 @@ def main(argv):
 
     surface.save('../constant/triSurface/surface_top.stl')
 
-
     # Create the outside mesh
     print('Saving out of crater topography stl')
     faces = tri_out
@@ -920,15 +900,14 @@ def main(argv):
     surface = mesh.Mesh(np.zeros(2 * faces.shape[0], dtype=mesh.Mesh.dtype))
     for i, f in enumerate(faces):
         for j in range(3):
-            surface.vectors[i][j] = vertices[f[2-j], :]
+            surface.vectors[i][j] = vertices[f[2 - j], :]
             surface.vectors[i + faces.shape[0]][j] = vertices_org[f[j], :]
-  
+
     volume, cog, inertia = surface.get_mass_properties()
-    print("Closed",surface.is_closed())
+    print("Closed", surface.is_closed(exact=True))
     print("Total Volume = {0}".format(volume))
 
     surface.save('../constant/triSurface/surface_total_closed.stl')
-
 
     # Create the inside mesh closed on top
     print('Saving closed surface crater stl')
@@ -937,16 +916,14 @@ def main(argv):
 
     for i, f in enumerate(faces):
         for j in range(3):
-            surface.vectors[i][j] = vertices_crater[f[2-j], :]
+            surface.vectors[i][j] = vertices_crater[f[2 - j], :]
             surface.vectors[i + faces.shape[0]][j] = vertices_org[f[j], :]
 
     volume, cog, inertia = surface.get_mass_properties()
-    print("Closed",surface.is_closed())
+    print("Closed", surface.is_closed(exact=True))
     print("Total Volume = {0}".format(volume))
 
     surface.save('../constant/triSurface/surface_crater_closed.stl')
-
-
 
     # Create the inside mesh closed on top
     print('Saving lagrangian stl')
@@ -956,11 +933,11 @@ def main(argv):
     surface = mesh.Mesh(np.zeros(2 * faces.shape[0], dtype=mesh.Mesh.dtype))
     for i, f in enumerate(faces):
         for j in range(3):
-            surface.vectors[i][j] = vertices2[f[2-j], :]            
+            surface.vectors[i][j] = vertices2[f[2 - j], :]
             surface.vectors[i + faces.shape[0]][j] = vertices_org[f[j], :]
 
     volume, cog, inertia = surface.get_mass_properties()
-    print("Closed",surface.is_closed())
+    print("Closed", surface.is_closed(exact=True))
     print("Lagrangian Volume = {0}".format(volume))
 
     surface.save('../constant/triSurface/surface_lagrangian.stl')
@@ -985,34 +962,33 @@ def main(argv):
 
         tri = Delaunay(points)
         faces = tri.simplices
-        
-        for count,tri_n in enumerate(tri.neighbors):
-        
-            check_edge = False
-        
-            if tri_n[0]==-1:
-            
-                check_edge = True
-                i1 = faces[count][1] 
-                i2 = faces[count][2] 
-                
-            if tri_n[1]==-1:
-            
-                check_edge = True
-                i1 = faces[count][0] 
-                i2 = faces[count][2] 
 
-            if tri_n[2]==-1:
-            
+        for count, tri_n in enumerate(tri.neighbors):
+
+            check_edge = False
+
+            if tri_n[0] == -1:
+
                 check_edge = True
-                i1 = faces[count][0] 
-                i2 = faces[count][1] 
+                i1 = faces[count][1]
+                i2 = faces[count][2]
+
+            if tri_n[1] == -1:
+
+                check_edge = True
+                i1 = faces[count][0]
+                i2 = faces[count][2]
+
+            if tri_n[2] == -1:
+
+                check_edge = True
+                i1 = faces[count][0]
+                i2 = faces[count][1]
 
             if check_edge:
-            
+
                 z_conduit_bottom[i1] = z_conduit_top[i1]
                 z_conduit_bottom[i2] = z_conduit_top[i2]
-
 
         # modified elevation 3D point refined grid
         vertices_top = np.column_stack(
@@ -1030,14 +1006,14 @@ def main(argv):
             for j in range(3):
                 surface.vectors[i][j] = vertices_top[f[j], :]
                 surface.vectors[i +
-                                faces.shape[0]][j] = vertices_bottom[f[2-j], :]
+                                faces.shape[0]][j] = vertices_bottom[f[2 -
+                                                                       j], :]
         volume, cog, inertia = surface.get_mass_properties()
-        print("Closed",surface.is_closed())
+        print("Closed", surface.is_closed())
         print("conduit Volume = {0}".format(volume))
 
-
         surface.save('../constant/triSurface/surface_conduit_closed.stl')
-        
+
 
 if __name__ == "__main__":
     main(sys.argv[1:])
