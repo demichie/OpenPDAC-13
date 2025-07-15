@@ -7,8 +7,8 @@ dist_flat = 15.0
 enne = 1.0  # shape parameter (1 linear, 2 spherical)
 depth = 10.0  # depth of the fissure
 nlevels = 4  # levels of refinements of the subsampled grid
-RBF_interpolation = True # smooth the topography inside the crater
-top_smooth_flag = True # smooth the top of crater volume
+RBF_interpolation = True  # smooth the topography inside the crater
+top_smooth_flag = True  # smooth the top of crater volume
 
 lagrangian_layer_depth = 10.0
 
