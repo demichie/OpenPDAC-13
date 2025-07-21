@@ -2,14 +2,15 @@
 
 ## 1. Case Summary
 
-This tutorial simulates a volcanic phreatic explosion using the **OpenPDAC** solver, a multiphase flow solver for Particle-Dispersed Clouds.
+This tutorial simulates a volcanic phreatic explosion using the **OpenPDAC** solver, a multiphase 
+flow solver for a mixture of gas and particles with coupled lagrnaigna blocks.
 
 The workflow demonstrates a sophisticated meshing and initialization process:
 
-1. **Multi-Block Meshing:** A complex base mesh is generated using `blockMesh`. It defines two distinct regions: an upper "atmospheric" domain with layered refinement near the ground, and a separate, sub-surface "crater" domain.
+1. **Multi-Block Meshing:** A complex base mesh is generated using `blockMesh`. It defines two distinctregions: an upper "atmospheric" domain with layered refinement near the ground, and a separate, sub-surface "crater" domain.
 1. **Topography-Conforming Deformation:** The upper surface of the mesh is then deformed using `topoGrid`, a custom utility provided with OpenPDAC, to make it conform to the real-world topography of Vulcano Island.
 1. **Atmospheric Initialization:** The simulation first establishes a stable, hydrostatic atmospheric profile across the entire domain.
-1. **Explosion Trigger:** High pressure, temperature, and a gas-particle mixture are initialized specifically within the pre-defined, sub-surface crater blocks. The explosion, therefore, originates from this synthetic crater located beneath the topographic surface.
+1. **Explosion Trigger:** High pressure, temperature, and a gas-particle mixture are initialized specifically within the pre-defined, sub-surface crater region. The explosion, therefore, originates from this synthetic crater located beneath the topographic surface.
 
 This case demonstrates advanced techniques like multi-block meshing for local refinement and the use of custom utilities (`topoGrid`) to handle complex geometries.
 
