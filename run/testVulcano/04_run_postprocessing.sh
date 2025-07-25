@@ -37,7 +37,25 @@ conda activate OpenPDACconda
 # =========================================================================
 
 
-# --- TASK 1: GENERATE ISOSURFACE PLOTS ---
+# --- TASK 1: GENERATE BALLISTIC IMPACT RASTER MAPS ---
+
+echo "--> Cleaning up previous ballistic raster maps..."
+rm -rf postProcessing/raster_maps/ballistics
+
+echo "--> Generating ballistic trajectory plots with plotBallistics.py..."
+python3 plotBallistics.py
+
+
+# --- TASK 2: CREATE RASTER MAPS OF THE FLOW ---
+
+echo "--> Cleaning up previous flow raster maps..."
+rm -rf postProcessing/raster_maps/flow
+
+echo "--> Creating final raster maps with createMaps.py..."
+# This script also appears to process data in parallel. Adjust --np as needed.
+python3 createMaps.py -np 64
+
+# --- TASK 3: GENERATE ISOSURFACE PLOTS ---
 
 echo "--> Cleaning up previous isosurface plot frames..."
 rm -rf postProcessing/frames_png
@@ -45,26 +63,7 @@ rm -rf postProcessing/frames_png
 echo "--> Generating isosurface plots with plotIso.py..."
 # This script may process data in parallel. Ensure the number of processors
 # (--np) matches a relevant setting for your case or script logic.
-runApplication python3 plotIso.py --np 32 --fr 5
-
-
-# --- TASK 2: GENERATE BALLISTIC IMPACT RASTER MAPS ---
-
-echo "--> Cleaning up previous ballistic raster maps..."
-rm -rf postProcessing/raster_maps/ballistics
-
-echo "--> Generating ballistic trajectory plots with plotBallistics.py..."
-runApplication python3 plotBallistics.py
-
-
-# --- TASK 3: CREATE RASTER MAPS OF THE FLOW ---
-
-echo "--> Cleaning up previous flow raster maps..."
-rm -rf postProcessing/raster_maps/flow
-
-echo "--> Creating final raster maps with createMaps.py..."
-# This script also appears to process data in parallel. Adjust --np as needed.
-runApplication python3 createMaps.py -np 64
+python3 plotIso.py --np 32 --fr 5
 
 
 # =========================================================================
