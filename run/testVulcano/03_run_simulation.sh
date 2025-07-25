@@ -32,12 +32,6 @@ echo "--> Starting the main simulation in parallel with $(getApplication)..."
 # This command will block until the simulation is finished.
 runParallel $(getApplication)
 
-# --- POST-PROCESSING ---
-
-echo "--> Reconstructing the case results..."
-# Merges the processor* directories into the main time directories.
-runApplication reconstructPar
-
 # -----------------------------------------------------------------------------
 echo
 echo "SIMULATION SCRIPT COMPLETE."
