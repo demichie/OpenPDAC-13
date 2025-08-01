@@ -78,6 +78,10 @@ bool Foam::solvers::OpenPDAC::read()
     innerResidual =     
         pimple.dict().lookupOrDefault<scalar>("innerResidual", 0.0);        
 
+    residualRatio =     
+        pimple.dict().lookupOrDefault<scalar>("residualRatio", 10.0);        
+
+
     if (pimple.dict().found("energyControl"))
             {
                 energyControlDict = pimple.dict().subDict("energyControl");
@@ -426,6 +430,10 @@ void Foam::solvers::OpenPDAC::preSolve()
     {
         setRDeltaT();
     }
+    
+    pimpleIter = 0;
+    forceFinalPimpleIter_ = false;
+    ratioFirstCheck = false;
 
     // Store divU from the previous mesh so that it can be
     // mapped and used in correctPhi to ensure the corrected phi
@@ -449,6 +457,16 @@ void Foam::solvers::OpenPDAC::preSolve()
 
 void Foam::solvers::OpenPDAC::prePredictor()
 {
+
+    pimpleIter++;    
+
+    if (forceFinalPimpleIter_ && !pimple.finalIter())
+    {
+        Info << "PIMPLE iter: " << pimpleIter
+             << " -> Bypassing (waiting for final iteration)." << endl;
+        return; // Non fare nulla in questa iterazione
+    }
+
     if (pimple.thermophysics() || pimple.flow())
     {
         alphaControls.correct(CoNum);
@@ -466,6 +484,12 @@ void Foam::solvers::OpenPDAC::prePredictor()
 
 void Foam::solvers::OpenPDAC::momentumTransportPredictor()
 {
+
+    if (forceFinalPimpleIter_ && !pimple.finalIter())
+    {
+        return; // Non fare nulla in questa iterazione
+    }
+
     fluid_.predictMomentumTransport();
 }
 
@@ -479,12 +503,24 @@ void Foam::solvers::OpenPDAC::thermophysicalTransportPredictor()
 
 void Foam::solvers::OpenPDAC::momentumTransportCorrector()
 {
+
+    if (forceFinalPimpleIter_ && !pimple.finalIter())
+    {
+        return; // Non fare nulla in questa iterazione
+    }
+
     fluid_.correctMomentumTransport();
 }
 
 
 void Foam::solvers::OpenPDAC::thermophysicalTransportCorrector()
 {
+
+    if (forceFinalPimpleIter_ && !pimple.finalIter())
+    {
+        return; // Non fare nulla in questa iterazione
+    }
+
     fluid_.correctThermophysicalTransport();
 }
 

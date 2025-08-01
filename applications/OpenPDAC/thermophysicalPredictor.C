@@ -143,6 +143,12 @@ void Foam::solvers::OpenPDAC::energyPredictor()
 
 void Foam::solvers::OpenPDAC::thermophysicalPredictor()
 {
+
+    if (forceFinalPimpleIter_ && !pimple.finalIter())
+    {
+        return; // Non fare nulla in questa iterazione
+    }
+
     for (int Ecorr=0; Ecorr<nEnergyCorrectors; Ecorr++)
     {
 

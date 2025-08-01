@@ -106,6 +106,13 @@ void Foam::solvers::OpenPDAC::faceMomentumPredictor()
 
 void Foam::solvers::OpenPDAC::momentumPredictor()
 {
+
+    if (forceFinalPimpleIter_ && !pimple.finalIter())
+    {
+        // Non fare nulla, la funzione è stata svuotata in questa iterazione.
+        return;
+    }
+
     UEqns.setSize(phases.size());
 
     if (faceMomentum)

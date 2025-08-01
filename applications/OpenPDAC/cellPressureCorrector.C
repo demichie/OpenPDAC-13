@@ -411,13 +411,56 @@ void Foam::solvers::OpenPDAC::cellPressureCorrector()
                     fvConstraints().constrain(pEqn);
 
                     pEqn.solve();
-                
+                                  
                     const DynamicList<SolverPerformance<scalar>> sp
                     (
                         Residuals<scalar>::field(mesh, "p_rgh")
                     );
+
                     label n = sp.size();
                     r0 = cmptMax(sp[n-1].initialResidual());
+                    
+                    if (pimple.firstNonOrthogonalIter() && pimple.firstPisoIter() && !pimple.finalIter())
+                    {
+                        Info << "PIMPLE iter: " << pimpleIter
+                             << ", Initial p_rgh residual: " << r0 << endl;
+
+                        // Resetta lo stato alla prima iterazione PIMPLE (corr=1)
+                        if (pimpleIter == 1)
+                        {
+                           prevPimpleInitialResidual_ = r0;
+                        }
+                        // Applica la logica di controllo nelle iterazioni successive
+                        else if (
+                            pimpleIter > pimple.nCorr()/2
+                         && !pimple.finalIter()
+                        )
+                        {
+                            Info << "residual ratio " << r0/prevPimpleInitialResidual_ << endl;
+                            // Se il residuo non è diminuito, imposta il flag
+                            if (r0 > prevPimpleInitialResidual_ * residualRatio)
+                            {
+                                if (ratioFirstCheck)
+                                {
+                                    Info << "  --> PIMPLE: Initial residual increased. "
+                                         << "Scheduling jump to final iter." << endl;
+                                    forceFinalPimpleIter_ = true;
+                                }
+                                else
+                                {
+                                    ratioFirstCheck = true;
+                                }
+                            }
+
+                            prevPimpleInitialResidual_ = r0;
+                        }
+                        else
+                        {
+                            // Aggiorna comunque il residuo per le iterazioni iniziali
+                            prevPimpleInitialResidual_ = r0;
+                        }
+                    }
+                    
                     // Info << " p_rgh initial residual " << r0 << endl;
                     // Info << checkResidual << endl;
                     if ( r0 <= nonOrthogonalResidual ) 
