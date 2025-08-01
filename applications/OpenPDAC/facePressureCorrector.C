@@ -395,6 +395,11 @@ void Foam::solvers::OpenPDAC::facePressureCorrector()
                                     ratioFirstCheck = true;
                                 }
                             }
+                            else
+                            {
+                                ratioFirstCheck = false;
+                            }
+
 
                             prevPimpleInitialResidual_ = r0;
                         }
