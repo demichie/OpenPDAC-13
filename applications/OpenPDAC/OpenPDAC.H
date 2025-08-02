@@ -112,6 +112,16 @@ protected:
         scalar innerResidual;
         
         scalar nonOrthogonalResidual;
+        
+        scalar residualRatio;
+        
+        scalar prevPimpleInitialResidual_;
+
+        bool forceFinalPimpleIter_;
+        
+        bool ratioFirstCheck;
+        
+        label pimpleIter;
 
     //- Optional LTS reciprocal time-step field
     tmp<volScalarField> trDeltaT;
