@@ -15,24 +15,48 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
+deform true;
+
 rasterFile output_file.asc;
 xVent 496665.0;
 yVent 4250680.0;
-expFactor 1.0;
-dzVert 30.0;
-exp_shape 1.0;
 interpRelRadius 6.0;  // start from 4 and decrease or increase to get "Face tets OK"
 saveSTL false;
 saveBinary true;
 orthogonalCorrection true;
-dist_rel1 0.1;
-dist_rel2 0.25;
-distC1 50.0;
-distC2 150.0;
-coeffVertDeformation 0.8;
-noDeformCoeff 0.5;
+dist_rel1 0.1;        // relative horizontal distance for vertical displacement only
+dist_rel2 0.25;       // relative horizontal distance for vert+hor displacemente
+distC1 50.0;          // radial crater distance for vertical displacemente only
+distC2 150.0;         // radial crater distance for vert+hor displacemente only
+coeffVertDeformation 0.8;  // coefficient weighting 2D (0.0) vs 3D (1.0) distance for IDW  
+noDeformCoeff 0.5;    // coefficient for no deformation top vertical layer
 // New parameters for negative levels deformation
 // zNeg  ( -100  );   // Depth levels (must be decreasing)
 // dxNeg (  30.0 );  // Horizontal deformation in X at each zNeg
 // dyNeg (  -45.0  );  // Horizontal deformation in Y at each zNeg
+
+
+smoothing false;
+
+// Number of iterations for the smoothing algorithm.
+nIter               200;
+
+// Relaxation factor for the face rotation.
+// A smaller value (e.g., 0.1-0.3) is more stable.
+relaxFactor         0.1;
+
+// The algorithm will stop if the worst non-orthogonality angle
+// in the mesh is below this value (in degrees).
+// E.g., 85 means it will stop if the worst angle is 5 degrees.
+stopOnQualityDeg    58.0;
+
+// Frequency of Laplacian smoothing.
+// Every 'laplacianFrequency' iterations, a global Laplacian smoothing
+// step will be performed instead of the rotational step.
+// Set to 0 to disable. A value of 5, 10, or 20 is a good start.
+laplacianFrequency   20;
+laplacianRelaxFactor         0.01;
+// ************************************************************************* //
+
+
 // ************************************************************************* //
