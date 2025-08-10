@@ -1,0 +1,11 @@
+url_path,views_total,views_unique
+/demichie/OpenPDAC-13/tree/main/applications/OpenPDAC/phaseSystem/interfacialModels/dragModels,10,2
+/demichie/OpenPDAC-13,6,4
+/demichie/OpenPDAC-13/tree/main/applications/OpenPDAC/phaseSystem/interfacialModels/dragModels/NonSphericalErgun,5,2
+/demichie/OpenPDAC-13/tree/main/applications/OpenPDAC/momentumTransportModels/kineticTheoryModels/conductivityModel,5,1
+/demichie/OpenPDAC-13/tree/main/applications/OpenPDAC/phaseSystem/interfacialModels/dragModels/dragModel,5,1
+/demichie/OpenPDAC-13/tree/main/applications/OpenPDAC/phaseSystem/interfacialModels/dragModels/GidaspowErgunWenYu,4,1
+/demichie/OpenPDAC-13/blob/main/applications/OpenPDAC/phaseSystem/interfacialModels/dragModels/GidaspowErgunWenYu/GidaspowErgunWenYu.C,3,1
+/demichie/OpenPDAC-13/tree/main/applications/OpenPDAC/momentumTransportModels/kineticTheoryModels/conductivityModel/Gidaspow,3,1
+/demichie/OpenPDAC-13/blob/main/applications/OpenPDAC/phaseSystem/interfacialModels/dragModels/solidSolidDrag/solidSolidDrag.C,2,2
+/demichie/OpenPDAC-13/blob/main/run/Valentine2020_twoP/constant/momentumTransfer,2,2
