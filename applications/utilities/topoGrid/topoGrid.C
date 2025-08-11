@@ -1766,14 +1766,19 @@ int main(int argc, char* argv[])
     {
 
         const int nSmoothIter = topoDict.lookupOrDefault<int>("nIter", 50);
-        const scalar relaxFactor =
-            topoDict.lookupOrDefault<scalar>("relaxFactor", 0.05);
+            
+        const scalar maxRotationAngleDeg = topoDict.lookupOrDefault<scalar>("maxRotationAngleDeg", 1.0);
+        const scalar maxRotationAngleRad = Foam::degToRad(maxRotationAngleDeg);
+            
         const scalar qualityThresholdDeg =
             topoDict.lookupOrDefault<scalar>("stopOnQualityDeg", 85.0);
         const int laplacianFrequency =
             topoDict.lookupOrDefault<int>("laplacianFrequency", 10);
         const scalar laplacianRelaxFactor =
             topoDict.lookupOrDefault<scalar>("laplacianRelaxFactor", 0.01);
+
+            const scalar blendingFactor = topoDict.lookupOrDefault<scalar>("internalBlending", 0.2);
+
         const scalar qualityCosThreshold =
             Foam::cos(degToRad(qualityThresholdDeg));
 
@@ -1784,7 +1789,7 @@ int main(int argc, char* argv[])
         Info << "\nImproving mesh quality using geometric face rotation..."
              << endl;
         Info << "  - Max smoothing iterations: " << nSmoothIter << endl;
-        Info << "  - Relaxation factor: " << relaxFactor << endl;
+        Info << "  - Max rotation angle (deg): " << maxRotationAngleDeg << endl;
         Info << "  - Stopping when worst non-orthogonality is below "
              << qualityThresholdDeg << " degrees." << endl;
 
@@ -1819,58 +1824,91 @@ int main(int argc, char* argv[])
                 (laplacianFrequency > 0
                  && (iter + 1) % laplacianFrequency == 0);
 
-            if (doLaplacianSmoothing)
+if (doLaplacianSmoothing)
+        {
+            // ======================================================= //
+            //             LAPLACIAN SMOOTHING ITERATION               //
+            // ======================================================= //
+            if (Pstream::master())
             {
-                // ======================================================= //
-                //             LAPLACIAN SMOOTHING ITERATION               //
-                // ======================================================= //
-                if (Pstream::master())
-                {
-                    Info << "  Iteration " << iter + 1
-                         << " - Performing global Laplacian smoothing..."
-                         << endl;
-                }
-
-                boolList pointsToMove(mesh.nPoints(), false);
-                forAll(pointsToMove, pI)
-                {
-                    if (!isBoundaryPoint[pI])
-                        pointsToMove[pI] = true;
-                }
-
-                pointField proposedDisplacement(mesh.nPoints(), vector::zero);
-                const labelListList& pointPoints = mesh.pointPoints();
-
-                forAll(pointsToMove, pI)
-                {
-                    if (pointsToMove[pI])
-                    {
-                        const labelList& neighbors = pointPoints[pI];
-                        if (neighbors.size() > 0)
-                        {
-                            point newPos = point::zero;
-                            forAll(neighbors, i)
-                            {
-                                newPos += mesh.points()[neighbors[i]];
-                            }
-                            newPos /= neighbors.size();
-                            proposedDisplacement[pI] = laplacianRelaxFactor
-                                * (newPos - mesh.points()[pI]);
-                        }
-                    }
-                }
-
-                syncTools::syncPointList(
-                    mesh, proposedDisplacement, sumOp<point>(), point::zero);
-
-                pointField& currentPoints =
-                    const_cast<pointField&>(mesh.points());
-                currentPoints += proposedDisplacement;
-                syncTools::syncPointPositions(mesh,
-                                              currentPoints,
-                                              minOp<point>(),
-                                              point(great, great, great));
+                Info << "  Iteration " << iter + 1 << " - Performing global blended Laplacian smoothing..." << endl;
             }
+
+
+            // --- Identify all points that can be moved (all internal points) ---
+            boolList pointsToMove(mesh.nPoints(), false);
+            forAll(pointsToMove, pI)
+            {
+                if (!isBoundaryPoint[pI])
+                {
+                    pointsToMove[pI] = true;
+                }
+            }
+
+            // --- Calculate proposed displacements locally ---
+            pointField proposedDisplacement(mesh.nPoints(), vector::zero);
+            
+            // Required topological information
+            const labelListList& pointPoints = mesh.pointPoints();
+            const labelListList& pointCells = mesh.pointCells();
+            const vectorField& cellCentres = mesh.cellCentres();
+
+            forAll(pointsToMove, pointI)
+            {
+                if (pointsToMove[pointI])
+                {
+                    const point& currentPos = mesh.points()[pointI];
+                    
+                    // 1. Calculate standard Laplacian position (average of connected points)
+                    const labelList& pPoints = pointPoints[pointI];
+                    point P_laplacian = point::zero;
+                    if (pPoints.size() > 0)
+                    {
+                        forAll(pPoints, i)
+                        {
+                            P_laplacian += mesh.points()[pPoints[i]];
+                        }
+                        P_laplacian /= pPoints.size();
+                    }
+                    else // Should not happen for a valid mesh point
+                    {
+                        P_laplacian = currentPos;
+                    }
+
+                    // 2. Calculate internal influence position (average of connected cell centers)
+                    const labelList& pCells = pointCells[pointI];
+                    point P_internal = point::zero;
+                    if (pCells.size() > 0)
+                    {
+                        forAll(pCells, i)
+                        {
+                            P_internal += cellCentres[pCells[i]];
+                        }
+                        P_internal /= pCells.size();
+                    }
+                    else // Can happen for unused points, but they shouldn't be in pointsToMove
+                    {
+                        P_internal = currentPos;
+                    }
+                    
+                    // 3. Blend the two ideal positions to get the final target position
+                    point P_ideal_blended =
+                        (1.0 - blendingFactor) * P_laplacian
+                      + blendingFactor * P_internal;
+                      
+                    // 4. Calculate the final displacement scaled by its specific relaxation factor
+                    proposedDisplacement[pointI] = laplacianRelaxFactor * (P_ideal_blended - currentPos);
+                }
+            }
+            
+            // --- Synchronize and apply the displacement ---
+            syncTools::syncPointList(mesh, proposedDisplacement, sumOp<point>(), point::zero);
+            
+            pointField& currentPoints = const_cast<pointField&>(mesh.points());
+            currentPoints += proposedDisplacement;
+            
+            syncTools::syncPointPositions(mesh, currentPoints, minOp<point>(), point(great,great,great));
+        }
             else
             {
                 // ======================================================= //
@@ -1950,10 +1988,21 @@ int main(int argc, char* argv[])
                             vector axis = S_hat ^ d_hat;
                             if (mag(axis) > SMALL)
                             {
-                                scalar angle =
-                                    Foam::acos(max(-1.0, min(1.0, cosAngle)));
-                                scalar relaxedAngle = relaxFactor * angle;
-                                quaternion R(normalised(axis), relaxedAngle);
+ // Calculate the total angle needed for full correction
+                            scalar totalCorrectionAngle = Foam::acos(max(-1.0, min(1.0, cosAngle)));
+
+                            // The angle for this step is the smaller of the two
+                            scalar rotationStepAngle = min(totalCorrectionAngle, maxRotationAngleRad);
+                            
+                            quaternion R(normalised(axis), rotationStepAngle);
+                            
+                            if (Pstream::master())
+                            {
+                                Info << "    - Correcting face " << worstFaceI << ". Angle needed: "
+                                     << Foam::radToDeg(totalCorrectionAngle) << " deg, applying: "
+                                     << Foam::radToDeg(rotationStepAngle) << " deg." << endl;
+                            }                            
+                            
                                 const face& worstFace =
                                     mesh.faces()[worstFaceI];
                                 forAll(worstFace, fp)
