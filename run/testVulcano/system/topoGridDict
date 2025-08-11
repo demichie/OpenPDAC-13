@@ -36,14 +36,14 @@ noDeformCoeff 0.5;    // coefficient for no deformation top vertical layer
 // dyNeg (  -45.0  );  // Horizontal deformation in Y at each zNeg
 
 
-smoothing false;
+smoothing true;
 
 // Number of iterations for the smoothing algorithm.
-nIter               200;
+nIter               400;
 
-// Relaxation factor for the face rotation.
-// A smaller value (e.g., 0.1-0.3) is more stable.
-relaxFactor         0.1;
+// Maximum rotation angle (in degrees) to apply in a single rotational
+// smoothing step. A small value (e.g., 1.0) ensures stability.
+maxRotationAngleDeg  1.0;
 
 // The algorithm will stop if the worst non-orthogonality angle
 // in the mesh is below this value (in degrees).
@@ -54,8 +54,15 @@ stopOnQualityDeg    58.0;
 // Every 'laplacianFrequency' iterations, a global Laplacian smoothing
 // step will be performed instead of the rotational step.
 // Set to 0 to disable. A value of 5, 10, or 20 is a good start.
-laplacianFrequency   20;
-laplacianRelaxFactor         0.01;
+laplacianFrequency   40;
+laplacianRelaxFactor         0.02;
+
+// Blending factor between standard Laplacian (point-based) and
+// internal influence (cell-center-based).
+// 0.0 = pure standard Laplacian.
+// 1.0 = pure internal cell-center influence.
+// A value around 0.2-0.5 is often a good compromise.
+internalBlending    0.5;
 // ************************************************************************* //
 
 
