@@ -346,7 +346,8 @@ void writeSTL(const word& stlFileName,
             stlFile << "  endfacet"
                     << "\n";
 
-            // Second triangle (p2, p4, p3) - Top-right, bottom-right, bottom-left
+            // Second triangle (p2, p4, p3) - Top-right, bottom-right,
+            // bottom-left
             vector normal2 = computeNormal(p2, p4, p3);
             stlFile << "  facet normal " << normal2.x() << " " << normal2.y()
                     << " " << normal2.z() << "\n";
@@ -697,8 +698,8 @@ Tuple2<scalar, scalar> interpolateNegDeformation(scalar z,
         return Tuple2<scalar, scalar>(0.0,
                                       0.0); // Above or at z=0 → No deformation
 
-    if (z > zNeg
-            [0]) // Interpolate between (0,0) at z=0 and (dxNeg[0], dyNeg[0]) at zNeg[0]
+    if (z > zNeg[0]) // Interpolate between (0,0) at z=0 and (dxNeg[0],
+                     // dyNeg[0]) at zNeg[0]
     {
         scalar w = z / zNeg[0]; // Weight factor (z=0 → w=0, z=zNeg[0] → w=1)
         scalar interpDx = w * dxNeg[0];
@@ -771,7 +772,8 @@ int main(int argc, char* argv[])
         const Switch checkMesh =
             topoDict.lookupOrDefault<Switch>("checkMesh", false);
 
-        // Read the swtich to raise the top of the mesh by the max elev of the topo
+        // Read the swtich to raise the top of the mesh by the max elev of the
+        // topo
         const Switch raiseTop =
             topoDict.lookupOrDefault<Switch>("raiseTop", true);
 
@@ -861,19 +863,19 @@ int main(int argc, char* argv[])
             std::string key;
             iss >> key;
 
-            if (key == "ncols")
+            if (key == "ncols" || key == "NCOLS")
                 iss >> ncols;
-            else if (key == "nrows")
+            else if (key == "nrows" || key == "NROWS")
                 iss >> nrows;
-            else if (key == "xllcorner" || key == "xllcenter")
+            else if (key == "xllcorner" || key == "XLLCORNER")
                 iss >> xllcorner;
-            else if (key == "yllcorner" || key == "yllcenter")
+            else if (key == "yllcorner" || key == "YLLCORNER")
                 iss >> yllcorner;
-            else if (key == "cellsize")
+            else if (key == "cellsize" || key == "CELLSIZE")
                 iss >> cellsize;
-            else if (key == "NODATA_value")
+            else if (key == "NODATA_value" || key == "NODATA_VALUE")
                 iss >> NODATA_value;
-            if (key == "NODATA_value")
+            if (key == "NODATA_value" || key == "NODATA_VALUE")
                 break;
         }
 
@@ -986,7 +988,8 @@ int main(int argc, char* argv[])
 
         // Approximation of the maximum distance of any mesh node
         // from the mesh centroid (Sen et al, 2017)
-        // scalar Ldef(0.5*std::sqrt( sqr(xMax-xMin) + sqr(yMax-yMin) + sqr(zMax-zMin) ));
+        // scalar Ldef(0.5*std::sqrt( sqr(xMax-xMin) + sqr(yMax-yMin) +
+        // sqr(zMax-zMin) ));
         scalar Ldef(0.5 * std::sqrt(sqr(xMax - xMin) + sqr(yMax - yMin)));
 
         Info << "Ldef = " << Ldef << endl;
@@ -1027,9 +1030,11 @@ int main(int argc, char* argv[])
         scalarField bottomAreas(z0FaceIndices.size());
         scalarField bottomCentresDz(z0FaceIndices.size());
 
-        // Loop through each face in the list and compute dz with bilinear interpolation
+        // Loop through each face in the list and compute dz with bilinear
+        // interpolation
         forAll(z0FaceIndices, facei)
         {
+
             point pCentre = faceCentres[z0FaceIndices[facei]];
 
             // Get x, y coordinates of the pointi
@@ -1155,8 +1160,8 @@ int main(int argc, char* argv[])
         // Output the global number of points and cells
         Info << "Global number of points: " << globalNumPoints << endl << endl;
 
-        // Lists for the mesh points at z=0 and for the area and deformation at these points
-        // These lists are created for each processor
+        // Lists for the mesh points at z=0 and for the area and deformation at
+        // these points These lists are created for each processor
         scalarList bottomPointsX;
         scalarList bottomPointsY;
         scalarList bottomPointsZ;
@@ -1166,7 +1171,8 @@ int main(int argc, char* argv[])
 
         point pEval(zeroPoints[0]);
 
-        // Loop over the points with z=0 to compute the deformation from the face centers
+        // Loop over the points with z=0 to compute the deformation from the
+        // face centers
         forAll(pDeform, pointi)
         {
             pEval = mesh.points()[pointi];
@@ -1204,11 +1210,13 @@ int main(int argc, char* argv[])
 
         if (orthogonalCorrection)
         {
-            // Loop over the faces to compute the x,y components of normal unit vector
+            // Loop over the faces to compute the x,y components of normal unit
+            // vector
             forAll(z0FaceIndices, facei)
             {
                 const face& f = faces[z0FaceIndices[facei]];
-                // Compute an estimate of the centre as the average of the points
+                // Compute an estimate of the centre as the average of the
+                // points
                 point pAvg = Zero;
                 forAll(f, fp)
                 {
@@ -1277,8 +1285,8 @@ int main(int argc, char* argv[])
         scalarList bottomPointsDx;
         scalarList bottomPointsDy;
 
-        // Loop over the points with z=0 to interpolate the x,y components of normal
-        // unit vector from the face centers
+        // Loop over the points with z=0 to interpolate the x,y components of
+        // normal unit vector from the face centers
         forAll(pDeform, pointi)
         {
             pEval = mesh.points()[pointi];
@@ -1325,7 +1333,8 @@ int main(int argc, char* argv[])
         // Start the computation of mesh deformation for top face centres
         word patchName = "top";
 
-        // Find the ID# associated with the patchName by iterating through boundaryMesh
+        // Find the ID# associated with the patchName by iterating through
+        // boundaryMesh
         label patchID = -1;
         forAll(mesh.boundaryMesh(), patchi)
         {
@@ -1614,7 +1623,8 @@ int main(int argc, char* argv[])
             {
                 if (pEval.z() < 1.e-3)
                 {
-                    // New: Compute horizontal deformation using zNeg, dxNeg, dyNeg
+                    // New: Compute horizontal deformation using zNeg, dxNeg,
+                    // dyNeg
                     Tuple2<scalar, scalar> negDeform =
                         interpolateNegDeformation(
                             pEval.z(), useNegDeformation, zNeg, dxNeg, dyNeg);
@@ -1764,58 +1774,70 @@ int main(int argc, char* argv[])
 
     if (smoothing)
     {
-
+        // --- Input Parameters ---
         const int nSmoothIter = topoDict.lookupOrDefault<int>("nIter", 50);
-            
-        const scalar maxRotationAngleDeg = topoDict.lookupOrDefault<scalar>("maxRotationAngleDeg", 1.0);
+        const scalar maxRotationAngleDeg =
+            topoDict.lookupOrDefault<scalar>("maxRotationAngleDeg", 1.0);
         const scalar maxRotationAngleRad = Foam::degToRad(maxRotationAngleDeg);
-            
         const scalar qualityThresholdDeg =
             topoDict.lookupOrDefault<scalar>("stopOnQualityDeg", 85.0);
         const int laplacianFrequency =
             topoDict.lookupOrDefault<int>("laplacianFrequency", 10);
         const scalar laplacianRelaxFactor =
             topoDict.lookupOrDefault<scalar>("laplacianRelaxFactor", 0.01);
-
-            const scalar blendingFactor = topoDict.lookupOrDefault<scalar>("internalBlending", 0.2);
-
+        const scalar blendingFactor =
+            topoDict.lookupOrDefault<scalar>("internalBlending", 0.2);
         const scalar qualityCosThreshold =
             Foam::cos(degToRad(qualityThresholdDeg));
 
-        // ====================================================================== //
-        //       START OF GEOMETRIC ROTATIONAL MESH SMOOTHING BLOCK //
-        // ====================================================================== //
-
-        Info << "\nImproving mesh quality using geometric face rotation..."
-             << endl;
+        // --- User Information ---
+        Info << "\nImproving mesh quality using hybrid smoother..." << endl;
         Info << "  - Max smoothing iterations: " << nSmoothIter << endl;
         Info << "  - Max rotation angle (deg): " << maxRotationAngleDeg << endl;
         Info << "  - Stopping when worst non-orthogonality is below "
              << qualityThresholdDeg << " degrees." << endl;
 
         // --- 0: Identify all boundary points that must remain fixed ---
+        Info << "Identifying fixed boundary points..." << endl;
         boolList isBoundaryPoint(mesh.nPoints(), false);
         forAll(mesh.boundaryMesh(), patchI)
         {
             const polyPatch& pp = mesh.boundaryMesh()[patchI];
-            // We fix points on all non-coupled boundaries (walls, inlets, outlets,
-            // etc.)
-            if (!pp.coupled())
+            Info << "  - Considering patch '" << pp.name()
+                 << "' (type: " << pp.type() << ") as a fixed boundary."
+                 << endl;
+            const labelUList& meshPts = pp.meshPoints();
+            forAll(meshPts, i)
             {
-                const labelUList& meshPts = pp.meshPoints();
-                forAll(meshPts, i)
-                {
-                    isBoundaryPoint[meshPts[i]] = true;
-                }
+                isBoundaryPoint[meshPts[i]] = true;
             }
         }
 
-        // --- 1. Initial Calculation ---
-        // Calculate the orthogonality for all faces once at the beginning.
+        // --- 1. Initial Calculation and Setup for Best-State Tracking ---
         mesh.clearGeom();
         tmp<scalarField> t_ortho = meshCheck::faceOrthogonality(
             mesh, mesh.faceAreas(), mesh.cellCentres());
         scalarField& ortho = t_ortho.ref();
+
+        // --- BEST MESH LOGIC: Initialize tracking variables ---
+        scalar initialMinOrtho = GREAT;
+        for (label faceI = 0; faceI < mesh.nInternalFaces(); ++faceI)
+        {
+            initialMinOrtho = min(initialMinOrtho, ortho[faceI]);
+        }
+        reduce(initialMinOrtho, minOp<scalar>());
+
+        pointField bestPoints = mesh.points();
+        scalar bestMinOrtho = initialMinOrtho;
+
+        if (Pstream::master())
+        {
+            scalar cosVal = max(-1.0, min(1.0, initialMinOrtho));
+            scalar initialWorstAngle = Foam::radToDeg(Foam::acos(cosVal));
+            Info << "  - Initial worst non-orthogonality: " << initialWorstAngle
+                 << " deg." << endl;
+        }
+        // --- END OF BEST MESH LOGIC ---
 
         // --- Main Hybrid Smoothing Loop ---
         for (int iter = 0; iter < nSmoothIter; ++iter)
@@ -1824,91 +1846,107 @@ int main(int argc, char* argv[])
                 (laplacianFrequency > 0
                  && (iter + 1) % laplacianFrequency == 0);
 
-if (doLaplacianSmoothing)
-        {
-            // ======================================================= //
-            //             LAPLACIAN SMOOTHING ITERATION               //
-            // ======================================================= //
-            if (Pstream::master())
+            if (doLaplacianSmoothing)
             {
-                Info << "  Iteration " << iter + 1 << " - Performing global blended Laplacian smoothing..." << endl;
-            }
+                // ======================================================= //
+                //             LAPLACIAN SMOOTHING ITERATION               //
+                // ======================================================= //
 
-
-            // --- Identify all points that can be moved (all internal points) ---
-            boolList pointsToMove(mesh.nPoints(), false);
-            forAll(pointsToMove, pI)
-            {
-                if (!isBoundaryPoint[pI])
+                // --- BEST MESH LOGIC: Revert to best state before Laplacian
+                // step ---
+                if (Pstream::master())
                 {
-                    pointsToMove[pI] = true;
+                    scalar bestAngleSoFar = Foam::radToDeg(
+                        Foam::acos(max(-1.0, min(1.0, bestMinOrtho))));
+                    Info << "  Iteration " << iter + 1
+                         << " - Reverting to best state (quality: "
+                         << bestAngleSoFar << " deg)"
+                         << " before applying Laplacian smoothing." << endl;
                 }
-            }
+                const_cast<pointField&>(mesh.points()) = bestPoints;
+                syncTools::syncPointPositions(
+                    mesh,
+                    const_cast<pointField&>(mesh.points()),
+                    minOp<point>(),
+                    point(great, great, great));
+                mesh.clearGeom();
+                // --- END OF BEST MESH LOGIC ---
 
-            // --- Calculate proposed displacements locally ---
-            pointField proposedDisplacement(mesh.nPoints(), vector::zero);
-            
-            // Required topological information
-            const labelListList& pointPoints = mesh.pointPoints();
-            const labelListList& pointCells = mesh.pointCells();
-            const vectorField& cellCentres = mesh.cellCentres();
-
-            forAll(pointsToMove, pointI)
-            {
-                if (pointsToMove[pointI])
+                if (Pstream::master())
                 {
-                    const point& currentPos = mesh.points()[pointI];
-                    
-                    // 1. Calculate standard Laplacian position (average of connected points)
-                    const labelList& pPoints = pointPoints[pointI];
-                    point P_laplacian = point::zero;
-                    if (pPoints.size() > 0)
-                    {
-                        forAll(pPoints, i)
-                        {
-                            P_laplacian += mesh.points()[pPoints[i]];
-                        }
-                        P_laplacian /= pPoints.size();
-                    }
-                    else // Should not happen for a valid mesh point
-                    {
-                        P_laplacian = currentPos;
-                    }
-
-                    // 2. Calculate internal influence position (average of connected cell centers)
-                    const labelList& pCells = pointCells[pointI];
-                    point P_internal = point::zero;
-                    if (pCells.size() > 0)
-                    {
-                        forAll(pCells, i)
-                        {
-                            P_internal += cellCentres[pCells[i]];
-                        }
-                        P_internal /= pCells.size();
-                    }
-                    else // Can happen for unused points, but they shouldn't be in pointsToMove
-                    {
-                        P_internal = currentPos;
-                    }
-                    
-                    // 3. Blend the two ideal positions to get the final target position
-                    point P_ideal_blended =
-                        (1.0 - blendingFactor) * P_laplacian
-                      + blendingFactor * P_internal;
-                      
-                    // 4. Calculate the final displacement scaled by its specific relaxation factor
-                    proposedDisplacement[pointI] = laplacianRelaxFactor * (P_ideal_blended - currentPos);
+                    Info
+                        << "  Iteration " << iter + 1
+                        << " - Performing global blended Laplacian smoothing..."
+                        << endl;
                 }
+
+                boolList pointsToMove(mesh.nPoints(), false);
+                forAll(pointsToMove, pI)
+                {
+                    if (!isBoundaryPoint[pI])
+                    {
+                        pointsToMove[pI] = true;
+                    }
+                }
+
+                pointField proposedDisplacement(mesh.nPoints(), vector::zero);
+                const labelListList& pointPoints = mesh.pointPoints();
+                const labelListList& pointCells = mesh.pointCells();
+                const vectorField& cellCentres = mesh.cellCentres();
+
+                forAll(pointsToMove, pointI)
+                {
+                    if (pointsToMove[pointI])
+                    {
+                        const point& currentPos = mesh.points()[pointI];
+
+                        const labelList& pPoints = pointPoints[pointI];
+                        point P_laplacian = point::zero;
+                        if (pPoints.size() > 0)
+                        {
+                            forAll(pPoints, i)
+                            {
+                                P_laplacian += mesh.points()[pPoints[i]];
+                            }
+                            P_laplacian /= pPoints.size();
+                        }
+                        else
+                        {
+                            P_laplacian = currentPos;
+                        }
+
+                        const labelList& pCells = pointCells[pointI];
+                        point P_internal = point::zero;
+                        if (pCells.size() > 0)
+                        {
+                            forAll(pCells, i)
+                            {
+                                P_internal += cellCentres[pCells[i]];
+                            }
+                            P_internal /= pCells.size();
+                        }
+                        else
+                        {
+                            P_internal = currentPos;
+                        }
+
+                        point P_ideal_blended =
+                            (1.0 - blendingFactor) * P_laplacian
+                            + blendingFactor * P_internal;
+                        proposedDisplacement[pointI] = laplacianRelaxFactor
+                            * (P_ideal_blended - currentPos);
+                    }
+                }
+
+                syncTools::syncPointList(
+                    mesh, proposedDisplacement, sumOp<point>(), point::zero);
+                const_cast<pointField&>(mesh.points()) += proposedDisplacement;
+                syncTools::syncPointPositions(
+                    mesh,
+                    const_cast<pointField&>(mesh.points()),
+                    minOp<point>(),
+                    point(great, great, great));
             }
-            
-            // --- Synchronize and apply the displacement ---
-            syncTools::syncPointList(mesh, proposedDisplacement, sumOp<point>(), point::zero);
-            
-            pointField& currentPoints = const_cast<pointField&>(mesh.points());
-            currentPoints += proposedDisplacement;
-            
-            syncTools::syncPointPositions(mesh, currentPoints, minOp<point>(), point(great,great,great));
-        }
             else
             {
                 // ======================================================= //
@@ -1988,21 +2026,23 @@ if (doLaplacianSmoothing)
                             vector axis = S_hat ^ d_hat;
                             if (mag(axis) > SMALL)
                             {
- // Calculate the total angle needed for full correction
-                            scalar totalCorrectionAngle = Foam::acos(max(-1.0, min(1.0, cosAngle)));
+                                scalar totalCorrectionAngle =
+                                    Foam::acos(max(-1.0, min(1.0, cosAngle)));
+                                scalar rotationStepAngle = min(
+                                    totalCorrectionAngle, maxRotationAngleRad);
+                                quaternion R(normalised(axis),
+                                             rotationStepAngle);
 
-                            // The angle for this step is the smaller of the two
-                            scalar rotationStepAngle = min(totalCorrectionAngle, maxRotationAngleRad);
-                            
-                            quaternion R(normalised(axis), rotationStepAngle);
-                            
-                            if (Pstream::master())
-                            {
-                                Info << "    - Correcting face " << worstFaceI << ". Angle needed: "
-                                     << Foam::radToDeg(totalCorrectionAngle) << " deg, applying: "
-                                     << Foam::radToDeg(rotationStepAngle) << " deg." << endl;
-                            }                            
-                            
+                                if (Pstream::master())
+                                {
+                                    Info << "    - Correcting face "
+                                         << worstFaceI << ". Angle needed: "
+                                         << Foam::radToDeg(totalCorrectionAngle)
+                                         << " deg, applying: "
+                                         << Foam::radToDeg(rotationStepAngle)
+                                         << " deg." << endl;
+                                }
+
                                 const face& worstFace =
                                     mesh.faces()[worstFaceI];
                                 forAll(worstFace, fp)
@@ -2024,25 +2064,63 @@ if (doLaplacianSmoothing)
 
                 syncTools::syncPointList(
                     mesh, displacement, sumOp<point>(), point::zero);
-                pointField& currentPoints =
-                    const_cast<pointField&>(mesh.points());
-                currentPoints += displacement;
-                syncTools::syncPointPositions(mesh,
-                                              currentPoints,
-                                              minOp<point>(),
-                                              point(great, great, great));
+                const_cast<pointField&>(mesh.points()) += displacement;
+                syncTools::syncPointPositions(
+                    mesh,
+                    const_cast<pointField&>(mesh.points()),
+                    minOp<point>(),
+                    point(great, great, great));
             }
 
-            // --- Re-calculate orthogonality for the next iteration's decision ---
+            // --- Recalculate orthogonality and check for new best state ---
             mesh.clearGeom();
             tmp<scalarField> t_ortho_new = meshCheck::faceOrthogonality(
                 mesh, mesh.faceAreas(), mesh.cellCentres());
             ortho = t_ortho_new.ref();
+
+            // --- BEST MESH LOGIC: Check and save if current state is better
+            // ---
+            scalar currentMinOrtho = GREAT;
+            for (label faceI = 0; faceI < mesh.nInternalFaces(); ++faceI)
+            {
+                currentMinOrtho = min(currentMinOrtho, ortho[faceI]);
+            }
+            reduce(currentMinOrtho, minOp<scalar>());
+
+            if (currentMinOrtho > bestMinOrtho)
+            {
+                bestMinOrtho = currentMinOrtho;
+                bestPoints = mesh.points();
+                if (Pstream::master())
+                {
+                    scalar bestAngle = Foam::radToDeg(
+                        Foam::acos(max(-1.0, min(1.0, bestMinOrtho))));
+                    Info << "    - New best mesh quality found at iteration "
+                         << iter + 1 << ": " << bestAngle << " deg." << endl;
+                }
+            }
+            // --- END OF BEST MESH LOGIC ---
         }
 
-        // ====================================================================== //
-        //        END OF GEOMETRIC ROTATIONAL MESH SMOOTHING BLOCK //
-        // ====================================================================== //
+        // --- BEST MESH LOGIC: Final restoration to the best found
+        // configuration ---
+        Info << "\nSmoothing iterations completed." << endl;
+        const_cast<pointField&>(mesh.points()) = bestPoints;
+        syncTools::syncPointPositions(mesh,
+                                      const_cast<pointField&>(mesh.points()),
+                                      minOp<point>(),
+                                      point(great, great, great));
+        mesh.clearGeom();
+
+        if (Pstream::master())
+        {
+            scalar finalBestAngle =
+                Foam::radToDeg(Foam::acos(max(-1.e-6, min(1.0, bestMinOrtho))));
+            Info << "Restored mesh to best configuration with worst "
+                    "non-orthogonality: "
+                 << finalBestAngle << " deg." << endl;
+        }
+        // --- END OF BEST MESH LOGIC ---
     }
 
     Info << "Writing new mesh" << endl;
