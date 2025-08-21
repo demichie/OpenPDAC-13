@@ -582,6 +582,7 @@ inverseDistanceInterpolationDzBottom(const point& internalPoint,
     const label n = boundaryVal1.size();
     scalar minValue = GREAT;
     label minIndex = -1;
+    const scalar eps = 1e-3;
 
     // Calculate distances and find the minimum in a single loop
     scalarField distances(n);
@@ -614,17 +615,18 @@ inverseDistanceInterpolationDzBottom(const point& internalPoint,
         for (label i = 0; i < n; ++i)
         {
             scalar distance = distances[i];
-            scalar weight = minValue / (distance * distance);
+            scalar weight = 0.0;
 
             // Neglect points outside the relative radius
-            if (distance > radiusThreshold)
-                weight = 0.0;
+            if ((distance / radiusThreshold - 1.0) < eps)
+            {
+                weight = minValue / (distance * distance);
+            }
 
             NumVal1 += weight * boundaryVal1[i];
             NumVal2 += weight * boundaryVal2[i];
-            Den += weight;
+            Den += weight;                        
         }
-
         interpolatedVal1 = NumVal1 / Den;
         interpolatedVal2 = NumVal2 / Den;
     }
@@ -1037,29 +1039,38 @@ int main(int argc, char* argv[])
 
             point pCentre = faceCentres[z0FaceIndices[facei]];
 
-            // Get x, y coordinates of the pointi
+            // Get x, y coordinates of the point
             scalar x = pCentre.x();
             scalar y = pCentre.y();
 
-            // Calculate row and column indices in the elevation matrix
-            int colIndex = (x - xllcorner) / cellsize;
-            int rowIndex = (y - yllcorner) / cellsize;
+            // --- START OF CORRECTED BLOCK ---
 
-            // Interpolate elevation value
-            if (colIndex >= 0 && colIndex <= ncols && rowIndex >= 0
-                && rowIndex <= nrows)
+            // Transform the point's coordinates into a grid coordinate system
+            // where integer values correspond to cell centers.
+            scalar x_grid = (x - xllcorner) / cellsize - 0.5;
+            scalar y_grid = (y - yllcorner) / cellsize - 0.5;
+
+            // The index of the bottom-left cell for interpolation is the
+            // integer part.
+            int colIndex = static_cast<int>(floor(x_grid));
+            int rowIndex = static_cast<int>(floor(y_grid));
+
+            // Check that the indices are within the matrix bounds for
+            // interpolation.
+            if (colIndex >= 0 && colIndex < ncols - 1 && rowIndex >= 0
+                && rowIndex < nrows - 1)
             {
-                // Bilinear interpolation
-                scalar xLerp =
-                    (x - (xllcorner + colIndex * cellsize)) / cellsize;
-                scalar yLerp =
-                    (y - (yllcorner + rowIndex * cellsize)) / cellsize;
+                // The fractional part is the weight for the interpolation.
+                scalar xLerp = x_grid - colIndex;
+                scalar yLerp = y_grid - rowIndex;
 
+                // Get the four surrounding elevation values.
                 scalar v00 = elevation(rowIndex, colIndex);
                 scalar v01 = elevation(rowIndex, colIndex + 1);
                 scalar v10 = elevation(rowIndex + 1, colIndex);
                 scalar v11 = elevation(rowIndex + 1, colIndex + 1);
 
+                // Bilinear interpolation
                 scalar zInterp = v00 * (1 - xLerp) * (1 - yLerp)
                     + v01 * xLerp * (1 - yLerp) + v10 * (1 - xLerp) * yLerp
                     + v11 * xLerp * yLerp;
@@ -1317,11 +1328,12 @@ int main(int argc, char* argv[])
             globalIdx[pointi] = globalPoints.toGlobal(pointi);
         }
 
-        syncTools::syncPointList(
-            mesh, localIdx, globalIdx, minEqOp<label>(), labelMax);
+        //syncTools::syncPointList(
+        //    mesh, localIdx, globalIdx, minEqOp<label>(), labelMax);
 
         Sout << "Proc" << Pstream::myProcNo() << " z=0 points "
              << bottomPointsArea.size() << endl;
+
 
         // Local number of points and cells
         label globalZ0Points = bottomPointsArea.size();
@@ -1511,7 +1523,7 @@ int main(int argc, char* argv[])
 
                 bool accept(true);
 
-                if (globalI > 0)
+                if (globalI >= 0)
                 {
                     if (addedPoint[globalI])
                     {
@@ -1715,10 +1727,9 @@ int main(int argc, char* argv[])
                 pDeform[pointi].x() = interpDx;
                 pDeform[pointi].y() = interpDy;
             }
-
             pDeform[pointi].z() = interpDz;
-        }
 
+        }
         mesh.setPoints(mesh.points() + pDeform);
 
         Sout << "Proc" << Pstream::myProcNo() << " mesh updated" << endl;
