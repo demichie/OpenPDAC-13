@@ -499,7 +499,8 @@ point inverseDistanceInterpolationDz(const scalar& Ldef,
                                      const scalarField& boundaryDz,
                                      const scalarField& boundaryDx,
                                      const scalarField& boundaryDy,
-                                     const scalarField& boundaryAreas)
+                                     const scalarField& boundaryAreas,
+                                     const scalar& distThr)
 {
     // Initialize variables
     point DeltaInterp;
@@ -531,7 +532,7 @@ point inverseDistanceInterpolationDz(const scalar& Ldef,
 
         distance_z = Foam::sqrt(dist2_xy + coeffVertDeformation * dist2_z);
 
-        if (distance < 1.e-5)
+        if (distance < 1.e-3*distThr)
         {
             DeltaInterp = vector(boundaryDx[i], boundaryDy[i], boundaryDz[i]);
             return DeltaInterp;
@@ -574,7 +575,8 @@ inverseDistanceInterpolationDzBottom(const point& internalPoint,
                                      const scalarField& boundaryPointsY,
                                      const scalarField& boundaryVal1,
                                      const scalarField& boundaryVal2,
-                                     const scalar& interpRelRadius)
+                                     const scalar& interpRelRadius,
+                                     const scalar& distThr)
 {
     scalar interpolatedVal1(0.0);
     scalar interpolatedVal2(0.0);
@@ -582,7 +584,7 @@ inverseDistanceInterpolationDzBottom(const point& internalPoint,
     const label n = boundaryVal1.size();
     scalar minValue = GREAT;
     label minIndex = -1;
-    const scalar eps = 1e-3;
+    const scalar eps = 1e-2;
 
     // Calculate distances and find the minimum in a single loop
     scalarField distances(n);
@@ -600,7 +602,7 @@ inverseDistanceInterpolationDzBottom(const point& internalPoint,
     }
 
     // Special case: very close to a boundary point
-    if (minValue < 1.e-5)
+    if (minValue < 1.e-3*distThr)
     {
         interpolatedVal1 = boundaryVal1[minIndex];
         interpolatedVal2 = boundaryVal2[minIndex];
@@ -625,7 +627,7 @@ inverseDistanceInterpolationDzBottom(const point& internalPoint,
 
             NumVal1 += weight * boundaryVal1[i];
             NumVal2 += weight * boundaryVal2[i];
-            Den += weight;                        
+            Den += weight;
         }
         interpolatedVal1 = NumVal1 / Den;
         interpolatedVal2 = NumVal2 / Den;
@@ -1007,6 +1009,36 @@ int main(int argc, char* argv[])
         const vectorField faceNormals = mesh.faceAreas() / mag(faceAreas);
         const faceList& faces = mesh.faces();
 
+        const pointField& points = mesh.points();
+
+        scalar minLenSqr = sqr(great);
+        scalar maxLenSqr = -sqr(great);
+
+        labelHashSet smallEdgeSet(mesh.nPoints() / 100);
+
+        forAll(faces, facei)
+        {
+            const face& f = faces[facei];
+
+            forAll(f, fp)
+            {
+                label fp1 = f.fcIndex(fp);
+
+                scalar magSqrE = magSqr(points[f[fp]] - points[f[fp1]]);
+
+                minLenSqr = min(minLenSqr, magSqrE);
+                maxLenSqr = max(maxLenSqr, magSqrE);
+            }
+        }
+
+        reduce(minLenSqr, minOp<scalar>());
+        reduce(maxLenSqr, maxOp<scalar>());
+
+        Info << "Min/max edge length = " << Foam::sqrt(minLenSqr) << " "
+             << Foam::sqrt(maxLenSqr) << endl;
+             
+        scalar distThr = Foam::sqrt(minLenSqr);
+
         // List of indexes of faces with z=0
         labelList z0FaceIndices;
 
@@ -1015,7 +1047,7 @@ int main(int argc, char* argv[])
         {
             // Check z of face
             if (mag(faceCentres[faceI].z())
-                < 1.e-3) // Usa SMALL per tolleranza numerica
+                < 1e-2*distThr) // Usa SMALL per tolleranza numerica
             {
                 // Add the face index
                 z0FaceIndices.append(faceI);
@@ -1188,7 +1220,7 @@ int main(int argc, char* argv[])
         {
             pEval = mesh.points()[pointi];
 
-            if (mag(pEval.z()) < 1e-3)
+            if (mag(pEval.z()) < 1e-2*distThr)
             {
                 Tuple2<scalar, scalar> result;
 
@@ -1198,7 +1230,8 @@ int main(int argc, char* argv[])
                     globalBottomCentresY,
                     globalBottomCentresDz,
                     globalBottomCentresAreas,
-                    interpRelRadius);
+                    interpRelRadius,
+                    distThr);
 
                 scalar interpDz = result.first();
                 scalar interpArea = result.second();
@@ -1302,7 +1335,7 @@ int main(int argc, char* argv[])
         {
             pEval = mesh.points()[pointi];
 
-            if (mag(pEval.z()) < 1e-3)
+            if (mag(pEval.z()) < 1e-2*distThr)
             {
                 Tuple2<scalar, scalar> result;
 
@@ -1312,7 +1345,8 @@ int main(int argc, char* argv[])
                                                          globalBottomCentresY,
                                                          globalBottomCentresDx,
                                                          globalBottomCentresDy,
-                                                         interpRelRadius);
+                                                         interpRelRadius,
+                                                         distThr);
 
                 bottomPointsDx.append(result.first());
                 bottomPointsDy.append(result.second());
@@ -1328,12 +1362,11 @@ int main(int argc, char* argv[])
             globalIdx[pointi] = globalPoints.toGlobal(pointi);
         }
 
-        //syncTools::syncPointList(
-        //    mesh, localIdx, globalIdx, minEqOp<label>(), labelMax);
+        // syncTools::syncPointList(
+        //     mesh, localIdx, globalIdx, minEqOp<label>(), labelMax);
 
         Sout << "Proc" << Pstream::myProcNo() << " z=0 points "
              << bottomPointsArea.size() << endl;
-
 
         // Local number of points and cells
         label globalZ0Points = bottomPointsArea.size();
@@ -1625,7 +1658,7 @@ int main(int argc, char* argv[])
 
             pEval = mesh.points()[pointi];
 
-            if (mag(pEval.z() - zMax) < 1.e-3)
+            if (mag(pEval.z() - zMax) < 1e-2*distThr)
             {
                 interpDz = maxTopo;
                 interpDx = 0.0;
@@ -1633,7 +1666,7 @@ int main(int argc, char* argv[])
             }
             else
             {
-                if (pEval.z() < 1.e-3)
+                if (pEval.z() < 1e-2*distThr)
                 {
                     // New: Compute horizontal deformation using zNeg, dxNeg,
                     // dyNeg
@@ -1652,7 +1685,8 @@ int main(int argc, char* argv[])
                         globalBottomCentresY,
                         globalBottomCentresDz,
                         globalBottomCentresAreas,
-                        interpRelRadius);
+                        interpRelRadius,
+                        distThr);
 
                     interpDz = result.first();
                 }
@@ -1671,7 +1705,8 @@ int main(int argc, char* argv[])
                                                        globalDz,
                                                        globalDx,
                                                        globalDy,
-                                                       globalAreas);
+                                                       globalAreas,
+                                                       distThr);
 
                     if (pEval.z() > noDeformLevel)
                     {
@@ -1689,7 +1724,7 @@ int main(int argc, char* argv[])
                 }
             }
 
-            if (pEval.z() > 1.e-3)
+            if (pEval.z() > 1e-2*distThr)
             {
                 dxMin_rel = (pEval.x() - xMin) / (xMax - xMin);
                 dxMax_rel = (xMax - pEval.x()) / (xMax - xMin);
@@ -1728,9 +1763,28 @@ int main(int argc, char* argv[])
                 pDeform[pointi].y() = interpDy;
             }
             pDeform[pointi].z() = interpDz;
-
         }
-        mesh.setPoints(mesh.points() + pDeform);
+        
+        // 1. Calculate the new proposed point positions in a temporary field.
+        //    We are not modifying the mesh itself yet.
+        tmp<pointField> tnewPoints = mesh.points() + pDeform;
+
+        // 2. Synchronize the positions of shared points across processors.
+        //    For each boundary point, this calculates the average of the positions
+        //    proposed by each processor that shares the point.
+        //    This "stitches" the mesh back together and eliminates discrepancies.
+        syncTools::syncPointPositions(
+            mesh,
+            tnewPoints.ref(),
+            maxOp<point>(),
+            point::zero
+        );
+
+        // 3. Now that the new positions are consistent, update the mesh.
+        //    We use movePoints, which is more robust than setPoints for this.
+        mesh.movePoints(tnewPoints());        
+        
+        // mesh.setPoints(mesh.points() + pDeform);
 
         Sout << "Proc" << Pstream::myProcNo() << " mesh updated" << endl;
 
