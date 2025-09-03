@@ -26,15 +26,14 @@ codeInclude
     code #
 {
 
-    const Foam::scalarList layer_fraction = {0.0, 0.025, 0.1, 0.25, 1.0};
-    const Foam::scalarList atmCells_aspect_ratio_bottom = {1.0, 1.0, 1.0};
-    const Foam::scalarList atmCells_aspect_ratio_top = {2.0, 2.0, 1.0};
-
-    /*
-    const Foam::scalarList layer_fraction = {0.0, 0.025, 0.1, 1.0};
-    const Foam::scalarList atmCells_aspect_ratio_bottom = {1.0, 1.0};
-    const Foam::scalarList atmCells_aspect_ratio_top = {2.0, 1.0};
-    */
+    const Foam::scalarList& layer_fraction =
+        dict.lookup("layer_fraction");
+    const Foam::scalarList& atmCells_aspect_ratio_bottom =
+        dict.lookup("atmCells_aspect_ratio_bottom");
+    const Foam::scalarList& atmCells_aspect_ratio_top =
+        dict.lookup("atmCells_aspect_ratio_top");
+        
+    Info << "layer_fraction " << layer_fraction << endl;
 
     // --- Helper Function for Geometric Grading Calculation (using auto/lambda)
     // ---
