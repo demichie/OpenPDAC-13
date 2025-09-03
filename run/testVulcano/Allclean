@@ -9,8 +9,8 @@ cleanCase
 
 # Explicitly remove the '0' directory
 rm -rf 0
-rm output_file.asc
-rm modified_points.png
+rm constant/DEM/output_file.asc
+rm constant/DEM/modified_points.png
 
 # Remove dictionaries that were copied by the run scripts
 rm -f system/controlDict

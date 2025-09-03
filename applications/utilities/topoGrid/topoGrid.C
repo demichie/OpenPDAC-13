@@ -842,16 +842,19 @@ int main(int argc, char* argv[])
             useNegDeformation = false;
         }
 
+        Foam::fileName pathPrefix = "./constant/DEM/";
+        Foam::fileName fullRasterFilePath = pathPrefix / rasterFile;
+
         // Output the file name to the terminal for verification
-        Info << "Raster file specified: " << rasterFile << endl;
+        Info << "Raster file specified: " << fullRasterFilePath << endl;
 
         // Read the ESRI ASCII Raster file
-        std::ifstream file(rasterFile);
+        std::ifstream file(fullRasterFilePath);
 
         if (!file.is_open())
         {
             FatalErrorInFunction
-                << "Unable to open the raster file: " << rasterFile
+                << "Unable to open the raster file: " << fullRasterFilePath
                 << exit(FatalError);
         }
 
@@ -1000,7 +1003,7 @@ int main(int argc, char* argv[])
 
         scalar noDeformLevel(noDeformCoeff * Ldef);
 
-        Info << "noDeformCoeff = " << noDeformCoeff << endl << endl;
+        Info << "noDeformCoeff = " << noDeformCoeff << endl;
         Info << "noDeformLevel = " << noDeformLevel << endl << endl;
 
         const vectorField& faceAreas = mesh.faceAreas();

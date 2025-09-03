@@ -39,7 +39,7 @@ echo "--> Cleaning the case from previous runs..."
 ./Allclean
 
 echo "--> Running Python script for geometry preparation..."
-python3 smoothCraterArea.py
+python3 smoothCraterArea.py > log.smoothCreaterArea
 
 cp ./system/controlDict.init ./system/controlDict
 

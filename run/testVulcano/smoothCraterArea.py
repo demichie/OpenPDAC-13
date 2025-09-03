@@ -34,7 +34,7 @@ def read_asc_with_pandas(filepath):
     data = pd.read_csv(filepath,
                        skiprows=6,
                        header=None,
-                       delim_whitespace=True)
+                       sep='\s+')
     return data.values, header
 
 
@@ -130,9 +130,16 @@ def plot_modified_points_3d(data,
 
 def main():
     # Input and output file paths
+    
+    DEM_path = "./constant/DEM/"
+
     input_asc = "dsm_vulc_5m.asc"
     output_asc = "output_file.asc"
     output_plot = "modified_points.png"
+        
+    input_path = os.path.join(DEM_path,input_asc)
+    output_path = os.path.join(DEM_path,output_asc)
+    plot_path = os.path.join(DEM_path,output_plot)
 
     # Percorsi dei file
     geometry_file = os.path.join("constant", "geometryParameters")
@@ -159,7 +166,7 @@ def main():
     radius = r_crater_top  # Radius in the same unit as coordinates
 
     # Read the input raster file
-    data, header = read_asc_with_pandas(input_asc)
+    data, header = read_asc_with_pandas(input_path)
 
     data = np.flipud(data)
 
@@ -179,12 +186,12 @@ def main():
 
     # Plot the modified points in 3D
     plot_modified_points_3d(new_data, mask, x_coords, y_coords, border_x,
-                            border_y, border_values, output_plot)
+                            border_y, border_values, plot_path)
 
     # Write the modified data to a new raster file
-    write_asc_with_pandas(output_asc, new_data, header)
+    write_asc_with_pandas(output_path, new_data, header)
 
-    print(f"Modified raster saved to {output_asc}")
+    print(f"Modified raster saved to {output_path}")
 
 
 if __name__ == "__main__":
