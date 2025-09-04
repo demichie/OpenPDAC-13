@@ -28,15 +28,16 @@ atm_x_neg           -1500.0;  // Horizontal extension of the left part of atmosp
 
 n_vert_layers       4;        // number of layers in the atmosphere
 
-hor_cell_size_topo  10.0;   // horizontal cell size at the top of the atmopshere block
+hor_cell_size_topo  15.0;   // horizontal cell size at the top of the atmopshere block
 
 crater_cell_size   5.0;
 
 dz_to_dxy_crater_ratio 1.0;   // aspect-ratio of cells at the top of the crater/base of atmosphere
 dz_to_dxy_atm_ratio    2.0;   // aspect-ratio of cells at the top of the bottom layer
 
+dz_ratio 1.15;    // vertical-size ratio between consecutive cells
+
 // Atmospheric layers parameters
-layer_fraction              List<scalar> (0.0 0.035 0.10 0.25 1.0);
 atmCells_aspect_ratio_bottom List<scalar> (1.0 1.0 1.0);
 atmCells_aspect_ratio_top   List<scalar> (2.0 2.0 1.0);
 

@@ -26,13 +26,44 @@ codeInclude
     code #
 {
 
-    const Foam::scalarList& layer_fraction =
-        dict.lookup("layer_fraction");
     const Foam::scalarList& atmCells_aspect_ratio_bottom =
         dict.lookup("atmCells_aspect_ratio_bottom");
     const Foam::scalarList& atmCells_aspect_ratio_top =
         dict.lookup("atmCells_aspect_ratio_top");
+
+    List<scalar> layer_fraction($n_vert_layers + 1, 0.0);
+
+    layer_fraction[$n_vert_layers] = 1.0;            
+    scalar delta_z($dz_ratio);
+
+    scalar c_bottom = $dz_to_dxy_crater_ratio;
+    scalar c_top = $dz_to_dxy_atm_ratio; 
+    scalar dz_bottom = $crater_cell_size * c_bottom;
+    scalar dz_top = $hor_cell_size_topo * c_top;
+
+    scalar zlayer_rel = 0.0;
+
+    for (label layer = 0; layer <= $n_vert_layers-2; ++layer)
+    {
+        label N = round( Foam::log(dz_top/dz_bottom) / Foam::log(delta_z));
+        Info << "N " << N << endl;
+        Info << "dz_bottom " << dz_bottom << endl; 
+        Info << "dz_top " << dz_top << endl; 
+        scalar z_layer = dz_bottom * ( 1.0 - pow(delta_z,N+1) ) / ( 1.0 - delta_z);
+        Info << "z_layer " << z_layer << endl;
+
+        zlayer_rel += (z_layer/$atm_top_z);
+        Info << "z_layer_rel " << zlayer_rel << endl;
+
+        layer_fraction[layer+1] = zlayer_rel;
+
+        c_top = atmCells_aspect_ratio_top[layer];
+        c_bottom = atmCells_aspect_ratio_bottom[layer];
+        dz_bottom = $hor_cell_size_topo * pow(2.0,layer+1) * c_bottom;
+        dz_top = $hor_cell_size_topo * pow(2.0,layer+1) * c_top;
         
+    }
+
     Info << "layer_fraction " << layer_fraction << endl;
 
     // --- Helper Function for Geometric Grading Calculation (using auto/lambda)
