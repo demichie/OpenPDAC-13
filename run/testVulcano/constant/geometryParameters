@@ -35,7 +35,7 @@ crater_cell_size   5.0;
 dz_to_dxy_crater_ratio 1.0;   // aspect-ratio of cells at the top of the crater/base of atmosphere
 dz_to_dxy_atm_ratio    2.0;   // aspect-ratio of cells at the top of the bottom layer
 
-dz_ratio 1.15;    // vertical-size ratio between consecutive cells
+dz_ratio 1.2;    // vertical-size ratio between consecutive cells
 
 // Atmospheric layers parameters
 atmCells_aspect_ratio_bottom List<scalar> (1.0 1.0 1.0);
