@@ -24,12 +24,12 @@ interpRelRadius 6.0;  // start from 4 and decrease or increase to get "Face tets
 saveSTL false;
 saveBinary true;
 orthogonalCorrection true;
-dist_rel1 0.1;        // relative horizontal distance for vertical displacement only
-dist_rel2 0.25;       // relative horizontal distance for vert+hor displacemente
+dist_rel1 0.02;        // relative horizontal distance for vertical displacement only
+dist_rel2 0.05;       // relative horizontal distance for vert+hor displacemente
 distC1 50.0;          // radial crater distance for vertical displacemente only
 distC2 150.0;         // radial crater distance for vert+hor displacemente only
-coeffVertDeformation 0.8;  // coefficient weighting 2D (0.0) vs 3D (1.0) distance for IDW  
-noDeformCoeff 0.5;    // coefficient for no deformation top vertical layer
+coeffVertDeformation 0.4;  // coefficient weighting 2D (0.0) vs 3D (1.0) distance for IDW  
+noDeformCoeff 0.35;    // coefficient for no deformation top vertical layer
 // New parameters for negative levels deformation
 // zNeg  ( -100  );   // Depth levels (must be decreasing)
 // dxNeg (  30.0 );  // Horizontal deformation in X at each zNeg
@@ -39,7 +39,7 @@ noDeformCoeff 0.5;    // coefficient for no deformation top vertical layer
 smoothing true;
 
 // Number of iterations for the smoothing algorithm.
-nIter               400;
+nIter               800;
 
 // Maximum rotation angle (in degrees) to apply in a single rotational
 // smoothing step. A small value (e.g., 1.0) ensures stability.
@@ -48,14 +48,14 @@ maxRotationAngleDeg  1.0;
 // The algorithm will stop if the worst non-orthogonality angle
 // in the mesh is below this value (in degrees).
 // E.g., 85 means it will stop if the worst angle is 5 degrees.
-stopOnQualityDeg    58.0;
+stopOnQualityDeg    50.0;
 
 // Frequency of Laplacian smoothing.
 // Every 'laplacianFrequency' iterations, a global Laplacian smoothing
 // step will be performed instead of the rotational step.
 // Set to 0 to disable. A value of 5, 10, or 20 is a good start.
-laplacianFrequency   40;
-laplacianRelaxFactor         0.02;
+laplacianFrequency   20;
+laplacianRelaxFactor         0.01;
 
 // Blending factor between standard Laplacian (point-based) and
 // internal influence (cell-center-based).
