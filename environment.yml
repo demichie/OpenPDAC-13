@@ -37,6 +37,7 @@ dependencies:
       - pyvista
       - requests
       - scooby
+      - seaborn
       - six
       - threadpoolctl
       - typing-extensions
