@@ -63,6 +63,16 @@ This is a classic fluid mechanics case, adapted to test polydisperse models.
 - **Physics:** Designed specifically to test and validate the **polydisperse kinetic theory models** implemented in OpenPDAC.
 - **Workflow:** A standard, single-run case that demonstrates phenomena like particle segregation and bubbling in a polydisperse system.
 
+### 6. `ensembleWorkflow` - Framework for Parametric Study Automation
+
+Unlike the other self-contained tutorials, the `ensembleWorkflow` directory provides a powerful and generic framework for automating **parametric studies**, **sensitivity analyses**, and **uncertainty quantification**.
+
+- **Key Feature:** A two-script workflow that decouples statistical sampling from simulation setup. It uses efficient **Latin Hypercube Sampling (LHS)** to generate a parameter space and then automatically creates a directory for each simulation run.
+- **Purpose:** Enables the user to systematically explore a parameter space by defining variables through a wide range of statistical distributions (`linear`, `log`, `power-law`, `truncated normal`, `truncated log-normal`, and `discrete`).
+- **Workflow:**
+    1. The user configures the desired parameter space in the `sampling_script.py`.
+    2. The user places their **own** OpenFOAM case files into the `templatedir`, using special placeholders (e.g., `ENSEMBLE_Pressure`) for the parameters they wish to vary.
+    3. The `./Allrun` script is executed, which generates a `samples.csv` file, visual plots of the parameter space, and a complete set of simulation directories (`ensemble.00000`, `ensemble.00001`, etc.), each ready to run.
 ______________________________________________________________________
 
 ## 4. How to Run a Tutorial
