@@ -25,6 +25,7 @@ find . -maxdepth 1 -type f -name "samples.csv" -exec echo "  [CSV File]  {}" \;
 find . -maxdepth 1 -type f \( -name "samples_plot.png" -o -name "samples_plot.pdf" \) -exec echo "  [Plot File] {}" \;
 find . -maxdepth 1 -type f -name "counts_of_*.png" -exec echo "  [Plot File] {}" \;
 find . -maxdepth 1 -type f -name "counts_of_*.pdf" -exec echo "  [Plot File] {}" \;
+find . -maxdepth 1 -type f -name "log.*" -exec echo "  [Log File] {}" \;
 echo "-----------------------------------------------------------------"
 
 # --- Confirmation Prompt ---
@@ -43,6 +44,7 @@ if [[ "$response" =~ ^[yY]$ ]]; then
     rm -f samples.csv
     rm -f samples_plot.png samples_plot.pdf
     rm -f counts_of_*.png counts_of_*.pdf
+    rm -f log.*
 
     echo "Cleanup complete."
 else

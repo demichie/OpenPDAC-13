@@ -45,14 +45,14 @@ echo "    Checks passed. All required files are present."
 # --- Step 1: Run Sampling Script ---
 echo
 echo "--- Step 1: Running Parameter Sampling ---"
-python3 "$SAMPLING_SCRIPT"
+python3 "$SAMPLING_SCRIPT" > log.sampling
 echo "--- Sampling finished successfully. ---"
 
 
 # --- Step 2: Run Ensemble Generation Script ---
 echo
 echo "--- Step 2: Generating Ensemble Directories ---"
-python3 "$ENSEMBLE_SCRIPT"
+python3 "$ENSEMBLE_SCRIPT" > log.folderCreation
 echo "--- Ensemble generation finished successfully. ---"
 
 echo
