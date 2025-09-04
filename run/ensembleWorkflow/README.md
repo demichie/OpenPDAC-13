@@ -153,7 +153,6 @@ Where `ParameterName` must exactly match a column header in `samples.csv`.
 # Simulation Parameters
 Volume = ENSEMBLE_Volume
 Pressure = ENSEMBLE_Pressure
-Solver = ENSEMBLE_SolverType
 ```
 
 ### 4.4. Operation
