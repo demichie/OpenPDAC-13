@@ -270,7 +270,7 @@ def plot_pair_grid(df: pd.DataFrame, axis_vars: List, category_vars: List,
     n_vars = len(axis_vars)
     fig, axes = plt.subplots(n_vars,
                              n_vars,
-                             figsize=(n_vars * 2.5, n_vars * 2.5))
+                             figsize=(n_vars * 3.7, n_vars * 2.5))
     for i, j in np.ndindex(axes.shape):
         ax = axes[i, j]
         x_var, y_var = axis_vars[j], axis_vars[i]
@@ -390,7 +390,7 @@ def main():
     4. Generates a comprehensive set of plots to visualize the samples,
        including a main pair plot and frequency counts for categorical variables.
     """
-    N_SAMPLES = 100
+    N_SAMPLES = 200
     SAMPLING_METHOD = 'lhs'
     GENERATE_PLOT = True
 
