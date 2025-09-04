@@ -1,0 +1,7 @@
+# Simulation Parameters
+GrainSize = ENSEMBLE_GrainSize
+x = ENSEMBLE_x
+y = ENSEMBLE_y
+Velocity = ENSEMBLE_Velocity
+
+

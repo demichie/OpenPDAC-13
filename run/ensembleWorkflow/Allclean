@@ -1,0 +1,50 @@
+#!/bin/bash
+
+# =============================================================================
+# Allclean - Script to clean up all generated files and directories.
+#
+# This script will REMOVE the following items from the current directory:
+#  - All 'ensemble.*' directories.
+#  - The 'samples.csv' file.
+#  - All generated plot files (*.png and *.pdf).
+#
+# It will ask for confirmation before deleting anything.
+# =============================================================================
+
+echo "This script will clean up all generated files and directories."
+echo
+
+# --- List Items to be Deleted ---
+# This makes the script safer by showing the user exactly what will be removed.
+echo "The following items have been found and will be PERMANENTLY DELETED:"
+echo "-----------------------------------------------------------------"
+# Use find to list items safely and handle the case where nothing is found.
+# The '-maxdepth 1' flag prevents it from listing contents of subdirectories.
+find . -maxdepth 1 -type d -name "ensemble.*" -exec echo "  [Directory] {}" \;
+find . -maxdepth 1 -type f -name "samples.csv" -exec echo "  [CSV File]  {}" \;
+find . -maxdepth 1 -type f \( -name "samples_plot.png" -o -name "samples_plot.pdf" \) -exec echo "  [Plot File] {}" \;
+find . -maxdepth 1 -type f -name "counts_of_*.png" -exec echo "  [Plot File] {}" \;
+find . -maxdepth 1 -type f -name "counts_of_*.pdf" -exec echo "  [Plot File] {}" \;
+echo "-----------------------------------------------------------------"
+
+# --- Confirmation Prompt ---
+# The -p flag displays a prompt. The default answer (if user hits Enter) is No.
+read -p "Are you sure you want to proceed with deletion? [y/N] " response
+echo # Add a newline for better formatting
+
+# --- Deletion Logic ---
+# Check if the user typed 'y' or 'Y'.
+if [[ "$response" =~ ^[yY]$ ]]; then
+    echo "--> Cleaning up..."
+
+    # The '-f' flag suppresses errors if a file doesn't exist.
+    # The '-r' flag is for recursively deleting directories.
+    rm -rf ensemble.*
+    rm -f samples.csv
+    rm -f samples_plot.png samples_plot.pdf
+    rm -f counts_of_*.png counts_of_*.pdf
+
+    echo "Cleanup complete."
+else
+    echo "Cleanup aborted by user. No files were deleted."
+fi
