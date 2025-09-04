@@ -86,6 +86,20 @@ Samples are drawn from a distribution where the probability of a value `x` is pr
      'exponent': -1.5, 'range': [0.1, 100.0]}
     ```
 
+**e) Truncated Log-Normal (`trunclognorm`)**
+Samples are drawn from a log-normal distribution, but are strictly bounded by the `range`. A variable `X` is log-normal if `ln(X)` is normally distributed. This distribution is defined by the mean and standard deviation of the *logarithm* of the variable.
+
+-   **Use Case**: For parameters that are known to follow a log-normal pattern (e.g., permeability, hydraulic conductivity, pollutant concentrations) but are constrained within a physically possible range.
+-   **Required Keys**:
+    -   `log_mean` (float): The mean (μ) of the *logarithm* of the variable.
+    -   `log_std_dev` (float): The standard deviation (σ) of the *logarithm* of the variable.
+    -   `range` (List[float]): The hard truncation limits `[min_val, max_val]` for the variable itself (not its logarithm). Must be positive.
+-   **Configuration**:
+    ```python
+    {'name': 'Permeability', 'type': 'continuous', 'distribution': 'trunclognorm',
+     'log_mean': -12.0, 'log_std_dev': 1.5, 'range': [1e-7, 1e-4]}
+    ```
+
 #### 3.2.3. Discrete Distributions
 
 For `'type': 'discrete'`, the following keys are used:

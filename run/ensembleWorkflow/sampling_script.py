@@ -54,18 +54,40 @@ def generate_samples(parameter_config: List[Dict],
     """Generates a set of parameter samples using a specified sampling method.
 
     This is the core engine that transforms a uniform Latin Hypercube sample
-    into samples for various continuous and discrete distributions.
+    into samples for various continuous and discrete distributions using the
+    Inverse Transform Sampling technique.
 
     Args:
         parameter_config (List[Dict]):
             A list where each dictionary defines a parameter to be sampled.
-            Each dictionary must contain:
-            - For continuous: 'name', 'type'='continuous', 'distribution'
-              ('linear', 'log', 'truncnorm', or 'powerlaw'), and 'range'.
-              For 'truncnorm', it also requires 'mean' and 'std_dev'.
-              For 'powerlaw', it requires 'exponent'.
-            - For discrete: 'name' or 'names', 'type'='discrete', 'values'.
-              Optionally 'weights' and 'unpack'=True.
+            Each dictionary must contain specific keys depending on the 'type'
+            and 'distribution'.
+
+            For 'type': 'continuous':
+                - 'name' (str): The parameter's name.
+                - 'distribution' (str): One of 'linear', 'log', 'truncnorm',
+                  'powerlaw', or 'trunclognorm'.
+                - 'range' (List[float]): The [min, max] bounds for the sample.
+
+                Additional keys for specific distributions:
+                - for 'truncnorm':
+                    - 'mean' (float): The mean of the underlying normal distribution.
+                    - 'std_dev' (float): The standard deviation of the underlying
+                      normal distribution.
+                - for 'powerlaw':
+                    - 'exponent' (float): The exponent 'k' for the p(x) ~ x^k relation.
+                - for 'trunclognorm':
+                    - 'log_mean' (float): The mean of the *logarithm* of the variable.
+                    - 'log_std_dev' (float): The standard deviation of the
+                      *logarithm* of the variable.
+
+            For 'type': 'discrete':
+                - 'name' (str) or 'names' (List[str]): The output column name(s).
+                - 'values' (List): The list of possible discrete values.
+                - 'weights' (List[float], optional): Relative weights for each value.
+                - 'unpack' (bool, optional): If True and 'names' is used, unpacks
+                  paired values (like coordinates) into separate columns.
+
         n_samples (int): The number of samples to generate for each parameter.
         method (str): The sampling method to use. Currently supports 'lhs'.
 
@@ -76,7 +98,8 @@ def generate_samples(parameter_config: List[Dict],
     Raises:
         KeyError: If a parameter's configuration is missing a required key.
         ValueError: If an unknown sampling method or an invalid value (e.g.,
-                    non-positive std_dev) is provided.
+                    non-positive std_dev, non-positive range for log/powerlaw)
+                    is provided.
     """
     samples = {}
     if method.lower() == 'lhs':
@@ -118,6 +141,38 @@ def generate_samples(parameter_config: List[Dict],
                         std_dev, (max_val - mean) / std_dev
                     dist = truncnorm(a, b, loc=mean, scale=std_dev)
                     samples[param['name']] = dist.ppf(unit_samples[:, i])
+                elif distribution == 'trunclognorm':
+                    try:
+                        log_mean, log_std_dev, (min_val, max_val) = param[
+                            'log_mean'], param['log_std_dev'], param['range']
+                    except KeyError as e:
+                        raise KeyError(
+                            f"Parameter '{param['name']}' with 'trunclognorm' is missing key: {e}"
+                        )
+                    if log_std_dev <= 0:
+                        raise ValueError(
+                            f"Log std dev for '{param['name']}' must be positive."
+                        )
+                    if min_val <= 0:
+                        raise ValueError(
+                            f"Range for trunclognorm must be positive. Got min_val={min_val}"
+                        )
+
+                    # Work in log-space: Y = ln(X)
+                    log_min, log_max = np.log(min_val), np.log(max_val)
+
+                    # Standardize the log-space bounds for scipy's truncnorm
+                    a = (log_min - log_mean) / log_std_dev
+                    b = (log_max - log_mean) / log_std_dev
+
+                    # Create a truncated normal distribution in log-space
+                    dist_log = truncnorm(a, b, loc=log_mean, scale=log_std_dev)
+
+                    # Sample from it using the LHS samples
+                    log_samples = dist_log.ppf(unit_samples[:, i])
+
+                    # Convert samples back to the original space by taking the exponential
+                    samples[param['name']] = np.exp(log_samples)
                 elif distribution == 'powerlaw':
                     try:
                         exponent, (min_val,
@@ -339,7 +394,15 @@ def main():
     SAMPLING_METHOD = 'lhs'
     GENERATE_PLOT = True
 
-    parameter_config = [{
+    parameter_config = [
+    {
+            'name': 'Permeability',
+            'type': 'continuous',
+            'distribution': 'trunclognorm',
+            'log_mean': -12.0,       # Mean of ln(Permeability)
+            'log_std_dev': 1.5,      # Std dev of ln(Permeability)
+            'range': [1e-7, 1e-4]  # Truncation range for Permeability itself
+    }, {
         'name': 'Volume',
         'type': 'continuous',
         'distribution': 'log',
@@ -398,7 +461,7 @@ def main():
                     axis_vars.extend(param['names'])
                 else:
                     axis_vars.append(param['name'])
-            if param.get('distribution') in ['log', 'powerlaw']:
+            if param.get('distribution') in ['log', 'powerlaw','trunclognorm']:
                 log_scale_vars.add(param['name'])
 
         plot_config = {'base_filename': OUTPUT_PLOT_BASE_FILENAME}
