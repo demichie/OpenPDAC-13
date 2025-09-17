@@ -371,8 +371,14 @@ def main(args, mode):
 
     write_interval, surfaces, _ = read_dict("system/sampleSurfaceAlpha")
     xVent, yVent, DEMfile = read_topoGridDict("system/topoGridDict")
-    Xinit, Yinit, Zinit, cell, extent = readASC(DEMfile)
-
+ 
+    DEMfile_path = os.path.join(os.getcwd(), "constant", "DEM", DEMfile)
+    if not os.path.exists(DEMfile_path):
+        raise FileNotFoundError(f"DEM file not found: {DEMfile_path}")
+    print("DEMfile_path resolved to:", DEMfile_path)
+    
+    Xinit, Yinit, Zinit, cell, extent = readASC(DEMfile_path)
+ 
     terrain_folder = "postProcessing/terrain/*"
     terrain_files = sorted(
         glob.glob(os.path.join(terrain_folder, "terrain.vtk")))

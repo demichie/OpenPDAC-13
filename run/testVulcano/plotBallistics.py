@@ -198,8 +198,14 @@ def main():
     grid_definition_mode = validate_args(args)
     print(f"Grid definition mode selected: {grid_definition_mode}")
 
-    xVent, yVent, DEMfile_path = read_topoGridDict("system/topoGridDict")
+    xVent, yVent, DEMfile_name = read_topoGridDict("system/topoGridDict")
     print('DEMfile_path from topoGridDict:', DEMfile_path)
+
+    DEMfile_path = os.path.join(os.getcwd(), "constant", "DEM", DEMfile_name)
+    if not os.path.exists(DEMfile_path):
+        raise FileNotFoundError(f"DEM file not found: {DEMfile_path}")
+    print("DEMfile_path resolved to:", DEMfile_path)
+    
     # X_dem_centers, Y_dem_centers are meshes of DEM cell centers
     # Z_dem_data is the elevation data
     # dem_cell_size is the resolution of the input DEM
