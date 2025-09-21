@@ -18,6 +18,7 @@ authors:
     orcid: 'https://orcid.org/0000-0002-6750-9245'
 repository-code: 'https://github.com/demichie/OpenPDAC-12/'
 url: 'https://github.com/demichie/OpenPDAC-12/'
+doi: 'https://doi.org/10.5281/zenodo.17054991'
 abstract: >
   OpenPDAC is an OpenFOAM module based on the module
   multiphaseEuler, distributed with OpenFOAM.
