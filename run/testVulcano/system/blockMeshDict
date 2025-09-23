@@ -252,10 +252,11 @@ codeInclude
     scalar alfa0 = pow(drRatio, 1.0 / (n0 + 1.0));
     scalar drTot0 = sqrt(actual_crater_top_size * $hor_cell_size_topo);
 
-    label n2 = ceil(ring_width_const / $hor_cell_size_topo);
+    // label n2 = ceil(ring_width_const / $hor_cell_size_topo);
+    label n2 = ceil(ring_width_const / actual_crater_top_size);
     scalar alfa2 = pow(drRatio, 1.0 / (n2 + 1.0));
     scalar drTot2 =
-        actual_crater_top_size * (alfa2 - pow(alfa2, n2 + 1)) / (1.0 - alfa2);
+        actual_crater_top_size * (alfa2 - pow(alfa2, n2+1)) / (1.0 - alfa2);
 
     Info << "n0 " << n0 << " n2 " << n2 << endl;
     Info << "alfa0 " << alfa0 << " alfa2 " << alfa2 << endl;
@@ -263,22 +264,30 @@ codeInclude
 
     scalar f0 = ring_width_const - drTot0;
     scalar f2 = ring_width_const - drTot2;
+    
+    Info << "f0 " << f0 << " f2 " << f2 << endl;
 
-    label n1 = label(round(0.5 * (n0 + n1)));
+    label n1 = label(round(0.5 * (n0 + n2)));
     scalar alfa1 = pow(drRatio, 1.0 / (n1 + 1.0));
     scalar drTot1 =
-        actual_crater_top_size * (alfa1 - pow(alfa1, n1 + 1)) / (1.0 - alfa1);
+        actual_crater_top_size * (alfa1 - pow(alfa1, n1+1)) / (1.0 - alfa1);
     scalar f1 = ring_width_const - drTot1;
+    
+    Info << "n1 " << n1 << " f1 " << f1 << endl;
 
     label iter = 0;
 
     while (iter < 10)
     {
         iter++;
-        if ((n0 == n1) || (n1 == n2))
+        Info << "n0 " << n0 << " n1 " << n1 << " n2 " << n2 << endl;
+        Info << "alfa0 " << alfa0 << " alfa1 " << alfa1 << " alfa2 " << alfa2 << endl;
+        Info << "f0 " << f0 << " f1 " << f1 << " f2 " << f2 << endl;
+        if ((n0 == n1) || (n1 == n2) || ( (n2-n0) == 1 ) )
         {
-            if (Foam::mag(f0) < Foam::mag(f2))
+            if ((Foam::mag(f0)*alfa0) < (Foam::mag(f2)*alfa2))
             {
+                Info << "Exit taking n0 " << n0 << " and drTot0 " << drTot0 << endl;
                 drTot1 = drTot0;
                 n1 = n0;
                 alfa1 = alfa0;
@@ -286,34 +295,46 @@ codeInclude
             }
             else
             {
+                Info << "Exit taking n2 " << n2 << " and drTot2 " << drTot2 << endl;
                 drTot1 = drTot2;
                 n1 = n2;
                 alfa1 = alfa2;
                 break;
             }
         }
+        
         if (f0 * f1 < 0)
         {
             n2 = n1;
+            f2 = f1;
+            drTot2 = drTot1;
+            alfa2 = alfa1;
         }
         else
         {
             n0 = n1;
+            f0 = f1;
+            drTot0 = drTot1;
+            alfa0 = alfa1;
         }
         n1 = label(round(0.5 * (n0 + n2)));
         alfa1 = pow(drRatio, 1.0 / (n1 + 1.0));
-        drTot1 = actual_crater_top_size * (alfa1 - pow(alfa1, n1 + 1))
-            / (1.0 - alfa2);
+        drTot1 = actual_crater_top_size * (alfa1 - pow(alfa1, n1+1))
+            / (1.0 - alfa1);
         f1 = ring_width_const - drTot1;
-        Info << "n1 " << n1 << " drTot1 " << drTot1 << " f1 " << f1 << endl;
+        Info << "n1 " << n1 << " drTot1 " << drTot1 << " alfa1 " << alfa1 << " f1 " << f1 << endl  << endl;
     }
 
-    Info << "n1 " << n1 << " drTot1 " << drTot1 << " f1 " << f1 << endl;
+    Info << "Number of radial cell in ring " << n1 << endl;
 
-    ring_width_const =
-        Foam::max(sqrt(actual_crater_top_size * $hor_cell_size_topo),
-                  0.5 * (ring_width_const + drTot1));
-    rad_gr_val = alfa1;
+    ring_width_const = drTot1;
+
+    Info << "Corrected width of the interface ring: " << ring_width_const
+         << endl;                  
+                  
+    rad_gr_val = pow(alfa1,n1-1);
+    Info << "Radial ratio between consecutive cells in ring " << alfa1 << endl; 
+    Info << "Ring grading " << rad_gr_val << endl; 
     n_rad_gr_interface = n1;
 
     /*
