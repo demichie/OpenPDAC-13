@@ -56,7 +56,7 @@ void generateCroppedDEM(const RectangularMatrix<double>& elevation,
                         scalar xmax,
                         scalar ymin,
                         scalar ymax,
-                        const word& outputFileName)
+                        const Foam::fileName& outputFileName)
 {
     // Adjust the domain bounds to match the DEM coordinate system
     xmin += xVent;
@@ -923,7 +923,7 @@ int main(int argc, char* argv[])
             scalar cellsizeSubsampled(factor * cellsize);
 
             // Create the output STL file name based on the input raster file
-            word stlFileName(rasterFile);
+            word stlFileName(fullRasterFilePath);
             stlFileName.replace(".asc", ".stl");
             Info << "Saving STL file: " << stlFileName << endl;
 
@@ -979,7 +979,9 @@ int main(int argc, char* argv[])
 
         if (saveCrop)
         {
-            word croppedDEMFile = "DEMcropped.asc";
+            Foam::fileName croppedDEMFile = pathPrefix / "DEMcropped.asc";
+
+            
             generateCroppedDEM(elevation,
                                xllcorner + xVent,
                                yllcorner + yVent,
