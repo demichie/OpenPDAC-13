@@ -41,10 +41,272 @@ Description
 #include "globalIndex.H"
 #include "polyMeshCheck.H"
 #include "syncTools.H"
+#include "vectorList.H"
 
 using namespace Foam;
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+/*
+ * Calcola i fattori di normalizzazione per ogni edge (1.0 / N),
+ * dove N è il numero di processori che condividono l'edge.
+ * Questo valore è un invariante topologico.
+ */
+scalarList calculateEdgeNormFactors(const fvMesh& mesh)
+{
+    // 1. Conta i processori per ogni edge usando la sincronizzazione.
+    labelList nProcsPerEdge(mesh.nEdges(), 1);
+    // --- CORREZIONE QUI: Aggiungere il nullValue per syncEdgeList ---
+    syncTools::syncEdgeList(
+        mesh,
+        nProcsPerEdge,
+        plusEqOp<label>(),
+        0 // NULLVALUE: 0 è il valore neutro per la somma dei label
+    );
+
+    // 2. Converte il conteggio nel fattore di normalizzazione.
+    scalarList normFactors(mesh.nEdges());
+    forAll(nProcsPerEdge, edgeI)
+    {
+        // Questo sarà sempre >= 1, quindi la divisione è sicura.
+        normFactors[edgeI] = 1.0 / scalar(nProcsPerEdge[edgeI]);
+    }
+
+    return normFactors;
+}
+
+/*
+ * Calcola il numero fisico di vicini per ogni punto.
+ * Questo è un altro invariante topologico.
+ * Utilizza i fattori di normalizzazione degli edge pre-calcolati.
+ */
+scalarList calculateNeighbourCount(const fvMesh& mesh,
+                                   const scalarList& normFactors)
+{
+    // Accumula localmente le frazioni
+    scalarList tempNeighbourCount(mesh.nPoints(), 0.0);
+    forAll(mesh.edges(), edgeI)
+    {
+        const edge& e = mesh.edges()[edgeI];
+        tempNeighbourCount[e.start()] += normFactors[edgeI];
+        tempNeighbourCount[e.end()] += normFactors[edgeI];
+    }
+
+    // Sincronizza per sommare le frazioni. Il risultato sarà il conteggio
+    // corretto.
+    // --- CORREZIONE QUI: Aggiungere il nullValue per syncPointList ---
+    syncTools::syncPointList(
+        mesh,
+        tempNeighbourCount,
+        plusEqOp<scalar>(),
+        0.0 // NULLVALUE: 0.0 è il valore neutro per la somma degli scalar
+    );
+
+    return tempNeighbourCount;
+}
+
+// --- NEW HELPER: Count how many processors see each MESH POINT ---
+// Returns a labelList indexed by local mesh point ID, containing how many procs
+// share it.
+labelList countProcessorsPerMeshPoint(const fvMesh& mesh)
+{
+    // 1. Inizializza una labelList per tenere i conteggi.
+    //    Ogni punto locale contribuisce con 1 al suo conteggio.
+    labelList nProcsPerPoint(mesh.nPoints(), 1);
+
+    // 2. Esegui la sincronizzazione per sommare questi conteggi per i punti
+    // condivisi.
+    //    La firma corretta richiede un nullValue di tipo label.
+    syncTools::syncPointList(
+        mesh,
+        nProcsPerPoint,
+        plusEqOp<label>(),
+        0 // <<--- NULLVALUE: 0 è il valore neutro per la somma dei label
+    );
+
+    return nProcsPerPoint;
+}
+
+scalarList calculateGlobalCellCount(const fvMesh& mesh)
+{
+    // Accumula localmente il conteggio delle celle
+    scalarList tempCellCount(mesh.nPoints(), 0.0);
+    forAll(mesh.points(), pointI)
+    {
+        tempCellCount[pointI] = scalar(mesh.pointCells(pointI).size());
+    }
+
+    // Sincronizza per sommare i conteggi. Il risultato sarà il conteggio
+    // corretto.
+    syncTools::syncPointList(mesh,
+                             tempCellCount,
+                             plusEqOp<scalar>(),
+                             0.0 // NULLVALUE
+    );
+
+    return tempCellCount;
+}
+
+// =========================================================================
+// Funzioni di Smoothing (calcolano solo le posizioni target)
+// =========================================================================
+
+// Calcola le posizioni target secondo lo smoothing basato sui punti
+tmp<pointField> getLaplacianTargetPoints(const fvMesh& mesh,
+                                         const scalarList& normFactors,
+                                         const scalarList& neighbourCount)
+{
+    // --- 1. Accumulo Frazionario Locale ---
+    vectorField sumNeighbourCoords(mesh.nPoints(), vector::zero);
+    forAll(mesh.edges(), edgeI)
+    {
+        const edge& e = mesh.edges()[edgeI];
+        const label p0 = e.start();
+        const label p1 = e.end(); // Corretto: label p1, non scalar p1
+        const scalar normFactor = normFactors[edgeI];
+
+        sumNeighbourCoords[p0] += mesh.points()[p1] * normFactor;
+        sumNeighbourCoords[p1] += mesh.points()[p0] * normFactor;
+    }
+
+    // --- 2. Sincronizzazione Globale dei Contributi ---
+    syncTools::syncPointList(mesh,
+                             sumNeighbourCoords,
+                             plusEqOp<vector>(),
+                             vector::zero // NULLVALUE
+    );
+
+    // --- 3. Calcolo dei Punti Target Laplaciani ---
+    // Pre-allocare la dimensione per il nuovo campo di punti.
+    tmp<pointField> tTargetPoints(new pointField(mesh.points().size()));
+    // --- CORREZIONE QUI: Usare const_cast per rimuovere il qualificatore const
+    // ---
+    pointField& targetPoints = const_cast<pointField&>(tTargetPoints());
+
+    forAll(targetPoints, pointI) // Itera su tutti i punti locali
+    {
+        if (neighbourCount[pointI] > VSMALL) // Verifica che ci siano vicini
+        {
+            targetPoints[pointI] =
+                sumNeighbourCoords[pointI] / neighbourCount[pointI];
+        }
+        else
+        {
+            // Se non ci sono vicini, il punto rimane nella sua posizione
+            // attuale.
+            targetPoints[pointI] = mesh.points()[pointI];
+        }
+    }
+    return tTargetPoints;
+}
+
+tmp<pointField> getCentroidalTargetPoints(const fvMesh& mesh)
+{
+    // --- 1. Accumulo Locale della Somma dei Centri delle Celle ---
+    vectorField sumCellCentres(mesh.nPoints(), vector::zero);
+    labelField localCellCounts(mesh.nPoints(), 0);
+
+    forAll(mesh.points(), pointI)
+    {
+        const labelList& pCells = mesh.pointCells(pointI);
+        forAll(pCells, i)
+        {
+            sumCellCentres[pointI] += mesh.cellCentres()[pCells[i]];
+            localCellCounts[pointI] += 1; // Incrementa il conteggio locale
+        }
+    }
+
+    // --- 2. Sincronizzazione Globale dei Contributi ---
+    syncTools::syncPointList(
+        mesh, sumCellCentres, plusEqOp<vector>(), vector::zero);
+    // NUOVO: Sincronizza anche i conteggi delle celle
+    syncTools::syncPointList(mesh,
+                             localCellCounts,
+                             plusEqOp<label>(),
+                             0 // NULLVALUE
+    );
+
+
+    // --- 3. Calcolo dei Punti Target Centroidali ---
+    tmp<pointField> tTargetPoints(new pointField(mesh.points().size()));
+    pointField& targetPoints = const_cast<pointField&>(tTargetPoints());
+
+    forAll(targetPoints, pointI)
+    {
+        if (localCellCounts[pointI]
+            > VSMALL) // Verifica con il conteggio globale sincronizzato
+        {
+            targetPoints[pointI] =
+                sumCellCentres[pointI] / localCellCounts[pointI];
+        }
+        else
+        {
+            targetPoints[pointI] = mesh.points()[pointI];
+        }
+    }
+    return tTargetPoints;
+}
+
+
+struct InterpolationSource
+{
+    point pCoords;    // Coordinates of the source point (x, y, z)
+    scalar dz;        // Z-deformation value
+    scalar dx;        // X-deformation value
+    scalar dy;        // Y-deformation value
+    scalar area;      // Associated area (e.g., face area for top patches)
+    bool isTopCentre; // Flag to distinguish z=0 points from top face centers
+
+    // Default constructor
+    InterpolationSource()
+    : pCoords(point::zero), dz(0.0), dx(0.0), dy(0.0), area(0.0),
+      isTopCentre(false)
+    {
+    }
+
+    // Serialization for Pstream communication
+    void write(Foam::Ostream& os) const
+    {
+        os << pCoords << " " << dz << " " << dx << " " << dy << " " << area
+           << " " << isTopCentre;
+    }
+
+    // Deserialization for Pstream communication
+    void read(Foam::Istream& is)
+    {
+        is >> pCoords >> dz >> dx >> dy >> area >> isTopCentre;
+    }
+};
+
+// --- NEW: Global comparison operators for Pstream ---
+inline bool operator==(const InterpolationSource& a,
+                       const InterpolationSource& b)
+{
+    return (a.pCoords == b.pCoords && a.dz == b.dz && a.dx == b.dx
+            && a.dy == b.dy && a.area == b.area
+            && a.isTopCentre == b.isTopCentre);
+}
+
+inline bool operator!=(const InterpolationSource& a,
+                       const InterpolationSource& b)
+{
+    return !(a == b);
+}
+// --- END NEW ---
+
+// Overload of stream operators for easy serialization/deserialization
+Foam::Ostream& operator<<(Foam::Ostream& os, const InterpolationSource& s)
+{
+    s.write(os);
+    return os;
+}
+
+Foam::Istream& operator>>(Foam::Istream& is, InterpolationSource& s)
+{
+    s.read(is);
+    return is;
+}
+
 
 void generateCroppedDEM(const RectangularMatrix<double>& elevation,
                         scalar xllcorner,
@@ -100,7 +362,7 @@ void generateCroppedDEM(const RectangularMatrix<double>& elevation,
             // Compute world coordinates of the new cell center
             scalar x = xllcorner_new + (col + 0.5) * cellsize_new;
             scalar y = yllcorner_new
-                + (nrows_new - row - 0.5) * cellsize_new; // Top to bottom
+                     + (nrows_new - row - 0.5) * cellsize_new; // Top to bottom
 
             // Compute corresponding indices in the original DEM
             int i = (y - (yllcorner + 0.5 * cellsize)) / cellsize;
@@ -111,9 +373,9 @@ void generateCroppedDEM(const RectangularMatrix<double>& elevation,
             {
                 // Compute interpolation weights
                 scalar xLerp = (x - (xllcorner + j * cellsize + 0.5 * cellsize))
-                    / cellsize;
+                             / cellsize;
                 scalar yLerp = (y - (yllcorner + i * cellsize + 0.5 * cellsize))
-                    / cellsize;
+                             / cellsize;
 
                 // Get the four surrounding elevation values
                 scalar v00 = elevation(i, j);
@@ -122,9 +384,9 @@ void generateCroppedDEM(const RectangularMatrix<double>& elevation,
                 scalar v11 = elevation(i + 1, j + 1);
 
                 // Bilinear interpolation
-                scalar zInterp = v00 * (1 - xLerp) * (1 - yLerp)
-                    + v01 * xLerp * (1 - yLerp) + v10 * (1 - xLerp) * yLerp
-                    + v11 * xLerp * yLerp;
+                scalar zInterp =
+                    v00 * (1 - xLerp) * (1 - yLerp) + v01 * xLerp * (1 - yLerp)
+                    + v10 * (1 - xLerp) * yLerp + v11 * xLerp * yLerp;
 
                 file << zInterp << " ";
             }
@@ -153,7 +415,7 @@ vector computeNormal(const point& p1, const point& p2, const point& p3)
     vector normal =
         Foam::vector(v1.y() * v2.z() - v1.z() * v2.y(), // x-component
                      v1.z() * v2.x() - v1.x() * v2.z(), // y-component
-                     v1.x() * v2.y() - v1.y() * v2.x() // z-component
+                     v1.x() * v2.y() - v1.y() * v2.x()  // z-component
         );
 
     // Normalize the normal vector
@@ -524,7 +786,7 @@ point inverseDistanceInterpolationDz(const scalar& Ldef,
     {
 
         dist2_xy = sqr(internalPoint.x() - boundaryPointsX[i])
-            + sqr(internalPoint.y() - boundaryPointsY[i]);
+                 + sqr(internalPoint.y() - boundaryPointsY[i]);
 
         dist2_z = sqr(internalPoint.z() - boundaryPointsZ[i]);
 
@@ -532,7 +794,7 @@ point inverseDistanceInterpolationDz(const scalar& Ldef,
 
         distance_z = Foam::sqrt(dist2_xy + coeffVertDeformation * dist2_z);
 
-        if (distance < 1.e-3*distThr)
+        if (distance < 1.e-3 * distThr)
         {
             DeltaInterp = vector(boundaryDx[i], boundaryDy[i], boundaryDz[i]);
             return DeltaInterp;
@@ -551,7 +813,7 @@ point inverseDistanceInterpolationDz(const scalar& Ldef,
             LbyD_z = Ldef / distance_z;
             LbyD3_z = LbyD_z * LbyD_z * LbyD_z;
             weight_z = boundaryAreas[i]
-                * (LbyD3_z + alpha5 * LbyD3_z * LbyD_z * LbyD_z);
+                     * (LbyD3_z + alpha5 * LbyD3_z * LbyD_z * LbyD_z);
         }
         else
         {
@@ -602,7 +864,7 @@ inverseDistanceInterpolationDzBottom(const point& internalPoint,
     }
 
     // Special case: very close to a boundary point
-    if (minValue < 1.e-3*distThr)
+    if (minValue < 1.e-3 * distThr)
     {
         interpolatedVal1 = boundaryVal1[minIndex];
         interpolatedVal2 = boundaryVal2[minIndex];
@@ -695,8 +957,7 @@ Tuple2<scalar, scalar> interpolateNegDeformation(scalar z,
                                                  const scalarList& dxNeg,
                                                  const scalarList& dyNeg)
 {
-    if (!useNegDeformation)
-        return Tuple2<scalar, scalar>(0.0, 0.0);
+    if (!useNegDeformation) return Tuple2<scalar, scalar>(0.0, 0.0);
 
     if (z >= 0.0)
         return Tuple2<scalar, scalar>(0.0,
@@ -722,7 +983,7 @@ Tuple2<scalar, scalar> interpolateNegDeformation(scalar z,
         if (zNeg[i] >= z && z > zNeg[i + 1])
         {
             scalar w = (z - zNeg[i + 1])
-                / (zNeg[i] - zNeg[i + 1]); // Interpolation weight
+                     / (zNeg[i] - zNeg[i + 1]); // Interpolation weight
             scalar interpDx = w * dxNeg[i] + (1 - w) * dxNeg[i + 1];
             scalar interpDy = w * dyNeg[i] + (1 - w) * dyNeg[i + 1];
             return Tuple2<scalar, scalar>(interpDx, interpDy);
@@ -747,63 +1008,61 @@ int main(int argc, char* argv[])
                                    IOobject::MUST_READ,
                                    IOobject::NO_WRITE));
 
+    // Declare variables that need to be accessible outside `if (deform)` block
+    // or need to be initialized before `if (deform)`
+    scalar Ldef = 0.0;
+    scalar maxTopo = 0.0;
+    scalar noDeformLevel = 0.0;
+    scalar alphaAll = 0.0;
+    scalar zMin = 0.0; // Declare zMin here
+    scalar zMax = 0.0; // Declare zMax here
+
+    // Final aggregated and sorted source fields for interpolation
+    scalarField globalPointsX;
+    scalarField globalPointsY;
+    scalarField globalPointsZ;
+    scalarField globalDz;
+    scalarField globalDx;
+    scalarField globalDy;
+    scalarField globalAreas;
+
+
     // Read the switch to deform the mesh
     const Switch deform = topoDict.lookupOrDefault<Switch>("deform", false);
 
     if (deform)
     {
-
-        // Read the raster file name from the dictionary
+        // --- Original initial variable declarations ---
         const word rasterFile = topoDict.lookup<word>("rasterFile");
-
-        // Read the vent center coordinates from the dictionary
         const scalar xVent = topoDict.lookupOrDefault<scalar>("xVent", 0.0);
         const scalar yVent = topoDict.lookupOrDefault<scalar>("yVent", 0.0);
-
-        // Read the relative distance for the smoothing kernel of the topography
         const scalar interpRelRadius =
             topoDict.lookupOrDefault<scalar>("interpRelRadius", 4.0);
-
-        // Read the switch to save the subsampled topo as STL
         const Switch saveSTL =
             topoDict.lookupOrDefault<Switch>("saveSTL", false);
-
-        // Read the switch to save the subsampled topo as binary STL
         const Switch saveBinary =
             topoDict.lookupOrDefault<Switch>("saveBinary", false);
-
-        // Read the swtich to perform some mesh quality check at the end
         const Switch checkMesh =
             topoDict.lookupOrDefault<Switch>("checkMesh", false);
-
-        // Read the swtich to raise the top of the mesh by the max elev of the
-        // topo
         const Switch raiseTop =
             topoDict.lookupOrDefault<Switch>("raiseTop", true);
-
         const Switch orthogonalCorrection =
             topoDict.lookupOrDefault<Switch>("orthogonalCorrection", false);
         const scalar dist_rel1 =
             topoDict.lookupOrDefault<scalar>("dist_rel1", 0.1);
         const scalar dist_rel2 =
             topoDict.lookupOrDefault<scalar>("dist_rel2", 0.2);
-
         const scalar distC1 = topoDict.lookupOrDefault<scalar>("distC1", 0.0);
         const scalar distC2 = topoDict.lookupOrDefault<scalar>("distC2", 0.0);
-
         const scalar noDeformCoeff =
             topoDict.lookupOrDefault<scalar>("noDeformCoeff", 0.5);
-
-        // Read the switch to save the cropped topography
         const Switch saveCrop =
             topoDict.lookupOrDefault<Switch>("saveCrop", false);
-
         const scalar coeffVertDeformation =
             topoDict.lookupOrDefault<scalar>("coeffVertDeformation", 1.0);
-
-        // Initialize empty lists
         scalarList zNeg, dxNeg, dyNeg;
         bool useNegDeformation = true;
+        // --- End original declarations ---
 
         if (topoDict.found("zNeg") && topoDict.found("dxNeg")
             && topoDict.found("dyNeg"))
@@ -815,7 +1074,7 @@ int main(int argc, char* argv[])
             // Ensure zNeg is sorted in decreasing order
             for (label i = 0; i < zNeg.size() - 1; ++i)
             {
-                if (zNeg[i] < zNeg[i + 1]) // Should be decreasing
+                if (zNeg[i] < zNeg[i + 1])
                 {
                     FatalErrorInFunction
                         << "zNeg list must be sorted in "
@@ -845,12 +1104,9 @@ int main(int argc, char* argv[])
         Foam::fileName pathPrefix = "./constant/DEM/";
         Foam::fileName fullRasterFilePath = pathPrefix / rasterFile;
 
-        // Output the file name to the terminal for verification
         Info << "Raster file specified: " << fullRasterFilePath << endl;
 
-        // Read the ESRI ASCII Raster file
         std::ifstream file(fullRasterFilePath);
-
         if (!file.is_open())
         {
             FatalErrorInFunction
@@ -863,15 +1119,13 @@ int main(int argc, char* argv[])
         double NODATA_value = -9999.0;
         std::string line;
 
-        // Read the header
         while (std::getline(file, line))
         {
             std::istringstream iss(line);
             std::string key;
             iss >> key;
 
-            if (key == "ncols" || key == "NCOLS")
-                iss >> ncols;
+            if (key == "ncols" || key == "NCOLS") iss >> ncols;
             else if (key == "nrows" || key == "NROWS")
                 iss >> nrows;
             else if (key == "xllcorner" || key == "XLLCORNER")
@@ -882,53 +1136,37 @@ int main(int argc, char* argv[])
                 iss >> cellsize;
             else if (key == "NODATA_value" || key == "NODATA_VALUE")
                 iss >> NODATA_value;
-            if (key == "NODATA_value" || key == "NODATA_VALUE")
-                break;
+            if (key == "NODATA_value" || key == "NODATA_VALUE") break;
         }
 
         xllcorner -= xVent;
         yllcorner -= yVent;
 
-        // Create a RectangularMatrix to store the elevation data
         RectangularMatrix<double> elevation(nrows, ncols, 0.0);
-
-        // Read the elevation data and store it in the RectangularMatrix
         for (int i = 0; i < nrows; ++i)
         {
             std::getline(file, line);
             std::istringstream iss(line);
-
             for (int j = 0; j < ncols; ++j)
             {
                 double value;
                 iss >> value;
-
-                if (value == NODATA_value)
-                    value = 0.0; // Handle NODATA_value appropriately
-
+                if (value == NODATA_value) value = 0.0;
                 elevation(nrows - 1 - i, j) = value;
             }
         }
 
         if (saveSTL)
         {
-            // Subsample the matrix with a factor of 4
             label factor = 2;
             RectangularMatrix<double> elevationSubsampled =
                 subsampleMatrix(elevation, ncols, nrows, factor);
-
             scalar xllSubsampled(xllcorner + (0.5 * factor) * cellsize);
             scalar yllSubsampled(yllcorner + (0.5 * factor) * cellsize);
-
             scalar cellsizeSubsampled(factor * cellsize);
-
-            // Create the output STL file name based on the input raster file
             word stlFileName(fullRasterFilePath);
             stlFileName.replace(".asc", ".stl");
             Info << "Saving STL file: " << stlFileName << endl;
-
-            // Write the STL surface to a file
-
             if (saveBinary)
             {
                 writeBinarySTL(stlFileName,
@@ -947,41 +1185,57 @@ int main(int argc, char* argv[])
             }
             Info << "Saving completed" << endl;
         }
-
         file.close();
 
         scalar xMin = min(mesh.Cf().component(0)).value();
         scalar xMax = max(mesh.Cf().component(0)).value();
-
         reduce(xMin, minOp<scalar>());
         reduce(xMax, maxOp<scalar>());
-
         Info << "xMin = " << xMin << endl;
         Info << "xMax = " << xMax << endl;
 
         scalar yMin = min(mesh.Cf().component(1)).value();
         scalar yMax = max(mesh.Cf().component(1)).value();
-
         reduce(yMin, minOp<scalar>());
         reduce(yMax, maxOp<scalar>());
-
         Info << "yMin = " << yMin << endl;
         Info << "yMax = " << yMax << endl;
 
-        scalar zMin = min(mesh.Cf().component(2)).value();
-        scalar zMax = max(mesh.Cf().component(2)).value();
-
+        // zMin/zMax from mesh are needed for Ldef calculation below
+        zMin = min(mesh.Cf().component(2))
+                   .value(); // Access zMin variable declared outside if block
+        zMax = max(mesh.Cf().component(2))
+                   .value(); // Access zMax variable declared outside if block
         reduce(zMin, minOp<scalar>());
         reduce(zMax, maxOp<scalar>());
-
         Info << "zMin = " << zMin << endl;
         Info << "zMax = " << zMax << endl;
+
+        label patchID = -1;
+        forAll(mesh.boundaryMesh(), patchi)
+        {
+            if (mesh.boundaryMesh()[patchi].name() == "top")
+            {
+                patchID = patchi;
+                break;
+            }
+        }
+        if (patchID == -1)
+        {
+            FatalErrorInFunction << "Patch 'top' not found in mesh. "
+                                 << "Cannot apply top surface deformation."
+                                 << exit(FatalError);
+        }
+
+        const fvPatch& patchTop = mesh.boundary()[patchID];
+        Info << "Preparing local top face centers for global interpolation "
+                "sources..."
+             << endl;
+
 
         if (saveCrop)
         {
             Foam::fileName croppedDEMFile = pathPrefix / "DEMcropped.asc";
-
-            
             generateCroppedDEM(elevation,
                                xllcorner + xVent,
                                yllcorner + yVent,
@@ -995,92 +1249,70 @@ int main(int argc, char* argv[])
                                croppedDEMFile);
         }
 
-        // Approximation of the maximum distance of any mesh node
-        // from the mesh centroid (Sen et al, 2017)
-        // scalar Ldef(0.5*std::sqrt( sqr(xMax-xMin) + sqr(yMax-yMin) +
-        // sqr(zMax-zMin) ));
-        scalar Ldef(0.5 * std::sqrt(sqr(xMax - xMin) + sqr(yMax - yMin)));
-
+        Ldef = (0.5 * std::sqrt(sqr(xMax - xMin) + sqr(yMax - yMin)));
         Info << "Ldef = " << Ldef << endl;
 
-        scalar noDeformLevel(noDeformCoeff * Ldef);
-
+        noDeformLevel = (noDeformCoeff * Ldef);
         Info << "noDeformCoeff = " << noDeformCoeff << endl;
         Info << "noDeformLevel = " << noDeformLevel << endl << endl;
 
         const vectorField& faceAreas = mesh.faceAreas();
         const vectorField& faceCentres = mesh.faceCentres();
         const scalarField magFaceAreas(mag(faceAreas));
-        const vectorField faceNormals = mesh.faceAreas() / mag(faceAreas);
         const faceList& faces = mesh.faces();
-
         const pointField& points = mesh.points();
 
         scalar minLenSqr = sqr(great);
         scalar maxLenSqr = -sqr(great);
-
         labelHashSet smallEdgeSet(mesh.nPoints() / 100);
 
         forAll(faces, facei)
         {
             const face& f = faces[facei];
-
             forAll(f, fp)
             {
                 label fp1 = f.fcIndex(fp);
-
                 scalar magSqrE = magSqr(points[f[fp]] - points[f[fp1]]);
-
                 minLenSqr = min(minLenSqr, magSqrE);
                 maxLenSqr = max(maxLenSqr, magSqrE);
             }
         }
-
         reduce(minLenSqr, minOp<scalar>());
         reduce(maxLenSqr, maxOp<scalar>());
-
         Info << "Min/max edge length = " << Foam::sqrt(minLenSqr) << " "
              << Foam::sqrt(maxLenSqr) << endl;
-             
+
         scalar distThr = Foam::sqrt(minLenSqr);
 
-        // List of indexes of faces with z=0
-        labelList z0FaceIndices;
 
-        // Pupolate list of faces at z=0, by iterating over all the mesh faces
+        // --- SECTION 1: PREPARATION OF Z=0 FACE CENTERS (FOR INITIAL
+        // INTERPOLATION TO POINTS) --- This block largely retains your original
+        // logic for processing z=0 faces and aggregating their data.
+
+        labelList z0FaceIndices;
         forAll(faces, faceI)
         {
-            // Check z of face
-            if (mag(faceCentres[faceI].z())
-                < 1e-2*distThr) // Usa SMALL per tolleranza numerica
+            if (mag(faceCentres[faceI].z()) < 1e-2 * distThr)
             {
-                // Add the face index
                 z0FaceIndices.append(faceI);
             }
         }
-
-        Sout << "Proc" << Pstream::myProcNo() << " z=0 faces "
+        Sout << "Proc" << Pstream::myProcNo() << " z=0 faces (local) "
              << z0FaceIndices.size() << endl;
 
-        // Create fieds for face centres coords, areas and dz
-        scalarField bottomCentresX(z0FaceIndices.size());
-        scalarField bottomCentresY(z0FaceIndices.size());
-        scalarField bottomCentresZ(z0FaceIndices.size());
-        scalarField bottomAreas(z0FaceIndices.size());
-        scalarField bottomCentresDz(z0FaceIndices.size());
+        scalarField bottomCentresX_local(z0FaceIndices.size());
+        scalarField bottomCentresY_local(z0FaceIndices.size());
+        scalarField bottomCentresZ_local(z0FaceIndices.size());
+        scalarField bottomAreas_local(z0FaceIndices.size());
+        scalarField bottomCentresDz_local(z0FaceIndices.size());
 
-        // Loop through each face in the list and compute dz with bilinear
-        // interpolation
         forAll(z0FaceIndices, facei)
         {
-
             point pCentre = faceCentres[z0FaceIndices[facei]];
 
             // Get x, y coordinates of the point
             scalar x = pCentre.x();
             scalar y = pCentre.y();
-
-            // --- START OF CORRECTED BLOCK ---
 
             // Transform the point's coordinates into a grid coordinate system
             // where integer values correspond to cell centers.
@@ -1091,6 +1323,7 @@ int main(int argc, char* argv[])
             // integer part.
             int colIndex = static_cast<int>(floor(x_grid));
             int rowIndex = static_cast<int>(floor(y_grid));
+
 
             // Check that the indices are within the matrix bounds for
             // interpolation.
@@ -1108,177 +1341,172 @@ int main(int argc, char* argv[])
                 scalar v11 = elevation(rowIndex + 1, colIndex + 1);
 
                 // Bilinear interpolation
-                scalar zInterp = v00 * (1 - xLerp) * (1 - yLerp)
-                    + v01 * xLerp * (1 - yLerp) + v10 * (1 - xLerp) * yLerp
-                    + v11 * xLerp * yLerp;
+                scalar zInterp =
+                    v00 * (1 - xLerp) * (1 - yLerp) + v01 * xLerp * (1 - yLerp)
+                    + v10 * (1 - xLerp) * yLerp + v11 * xLerp * yLerp;
 
-                bottomCentresX[facei] = faceCentres[z0FaceIndices[facei]].x();
-                bottomCentresY[facei] = faceCentres[z0FaceIndices[facei]].y();
-                bottomCentresZ[facei] = faceCentres[z0FaceIndices[facei]].z();
-                bottomAreas[facei] = magFaceAreas[z0FaceIndices[facei]];
-                bottomCentresDz[facei] =
+                bottomCentresX_local[facei] =
+                    faceCentres[z0FaceIndices[facei]].x();
+                bottomCentresY_local[facei] =
+                    faceCentres[z0FaceIndices[facei]].y();
+                bottomCentresZ_local[facei] =
+                    faceCentres[z0FaceIndices[facei]].z();
+                bottomAreas_local[facei] = magFaceAreas[z0FaceIndices[facei]];
+                bottomCentresDz_local[facei] =
                     zInterp - faceCentres[z0FaceIndices[facei]].z();
             }
             else
             {
-                FatalErrorInFunction << "Check asc size" << exit(FatalError);
+                FatalErrorInFunction
+                    << "Coordinates (" << x << ", " << y
+                    << ") out of DEM bounds "
+                    << "x_grid: " << x_grid << ", y_grid: " << y_grid << ", "
+                    << "colIndex: " << colIndex << ", rowIndex: " << rowIndex
+                    << ", "
+                    << "ncols: " << ncols << ", nrows: " << nrows
+                    << exit(FatalError);
             }
         }
 
-        // Create list with nproc fields
-        List<scalarField> CentresX(Pstream::nProcs());
-        CentresX[Pstream::myProcNo()].setSize(bottomCentresDz.size(),
-                                              Pstream::myProcNo());
+        // Aggregate Z=0 face center data from all processors for initial point
+        // interpolation
 
-        List<scalarField> CentresY(Pstream::nProcs());
-        CentresY[Pstream::myProcNo()].setSize(bottomCentresDz.size(),
-                                              Pstream::myProcNo());
+        // Create list with nproc fields for CentresX
+        List<scalarField> allProcBottomCentresX(Pstream::nProcs());
+        allProcBottomCentresX[Pstream::myProcNo()] = bottomCentresX_local;
+        Pstream::gatherList<scalarField>(allProcBottomCentresX);
+        Pstream::scatterList<scalarField>(allProcBottomCentresX);
 
-        List<scalarField> Dz(Pstream::nProcs());
-        Dz[Pstream::myProcNo()].setSize(bottomCentresDz.size(),
-                                        Pstream::myProcNo());
+        // Create list with nproc fields for CentresY
+        List<scalarField> allProcBottomCentresY(Pstream::nProcs());
+        allProcBottomCentresY[Pstream::myProcNo()] = bottomCentresY_local;
+        Pstream::gatherList<scalarField>(allProcBottomCentresY);
+        Pstream::scatterList<scalarField>(allProcBottomCentresY);
 
-        List<scalarField> Areas(Pstream::nProcs());
-        Areas[Pstream::myProcNo()].setSize(bottomCentresDz.size(),
-                                           Pstream::myProcNo());
+        // Create list with nproc fields for CentresZ
+        List<scalarField> allProcBottomCentresZ(Pstream::nProcs());
+        allProcBottomCentresZ[Pstream::myProcNo()] = bottomCentresZ_local;
+        Pstream::gatherList<scalarField>(allProcBottomCentresZ);
+        Pstream::scatterList<scalarField>(allProcBottomCentresZ);
 
-        // Each processor populate its field in the list of fields
-        for (label i = 0; i < bottomCentresX.size(); ++i)
-        {
-            CentresX[Pstream::myProcNo()][i] = bottomCentresX[i];
-            CentresY[Pstream::myProcNo()][i] = bottomCentresY[i];
-            Areas[Pstream::myProcNo()][i] = bottomAreas[i];
-            Dz[Pstream::myProcNo()][i] = bottomCentresDz[i];
-        }
+        // Create list with nproc fields for CentresDz
+        List<scalarField> allProcBottomCentresDz(Pstream::nProcs());
+        allProcBottomCentresDz[Pstream::myProcNo()] = bottomCentresDz_local;
+        Pstream::gatherList<scalarField>(allProcBottomCentresDz);
+        Pstream::scatterList<scalarField>(allProcBottomCentresDz);
 
-        // Use gather and scatter to have the full lists for all the processors
-        Pstream::gatherList<scalarField>(CentresX);
-        Pstream::scatterList<scalarField>(CentresX);
-
-        Pstream::gatherList<scalarField>(CentresY);
-        Pstream::scatterList<scalarField>(CentresY);
-
-        Pstream::gatherList<scalarField>(Areas);
-        Pstream::scatterList<scalarField>(Areas);
-
-        Pstream::gatherList<scalarField>(Dz);
-        Pstream::scatterList<scalarField>(Dz);
+        // Create list with nproc fields for CentresAreas
+        List<scalarField> allProcBottomAreas(Pstream::nProcs());
+        allProcBottomAreas[Pstream::myProcNo()] = bottomAreas_local;
+        Pstream::gatherList<scalarField>(allProcBottomAreas);
+        Pstream::scatterList<scalarField>(allProcBottomAreas);
 
         // Create the global fields
-        scalarField globalBottomCentresX;
-        scalarField globalBottomCentresY;
-        scalarField globalBottomCentresDz;
-        scalarField globalBottomCentresAreas;
+        scalarField globalBottomCentresX_agg;
+        scalarField globalBottomCentresY_agg;
+        scalarField globalBottomCentresZ_agg;
+        scalarField globalBottomCentresDz_agg;
+        scalarField globalBottomCentresAreas_agg;
 
         for (label i = 0; i < Pstream::nProcs(); ++i)
         {
-            globalBottomCentresX.append(CentresX[i]);
-            globalBottomCentresY.append(CentresY[i]);
-            globalBottomCentresDz.append(Dz[i]);
-            globalBottomCentresAreas.append(Areas[i]);
+            globalBottomCentresX_agg.append(allProcBottomCentresX[i]);
+            globalBottomCentresY_agg.append(allProcBottomCentresY[i]);
+            globalBottomCentresZ_agg.append(allProcBottomCentresZ[i]);
+            globalBottomCentresDz_agg.append(allProcBottomCentresDz[i]);
+            globalBottomCentresAreas_agg.append(allProcBottomAreas[i]);
         }
 
-        double maxTopo;
-        if (raiseTop)
+        Info << "Aggregated z=0 face centers (with duplicates if any): "
+             << globalBottomCentresAreas_agg.size() << endl;
+
+        // --- SECTION 2: ORTHOGONAL CORRECTION DX/DY FOR Z=0 FACES (PRESERVED)
+        // --- This block is your original logic for calculating Dx/Dy for z=0
+        // faces and aggregating it. Its results (globalBottomCentresDx_agg,
+        // globalBottomCentresDy_agg) will be used to interpolate dx/dy for z=0
+        // mesh points in the next step.
+
+
+        // Temporary pointField to store the Z-deformed positions of original
+        // mesh points at z=0. This is crucial for calculating face normals in
+        // the orthogonal correction. Initialize with original mesh points.
+        pointField z0Points_deformedZ(mesh.points());
+        scalarField z0Points_areas(mesh.points().size());
+
+        // PASSO 2a: Deform Z for z=0 mesh points only (preliminary step)
+        // This loop calculates only the vertical deformation (Dz) for points at
+        // z=0 and updates their Z-coordinate in z0Points_deformedZ.
+        Info << "Performing preliminary Z-deformation for local z=0 mesh "
+                "points..."
+             << endl;
+
+        label localNumZ0Points = 0;
+
+        forAll(mesh.points(), pointi)
         {
-            maxTopo = max(globalBottomCentresDz);
-        }
-        else
-        {
-            maxTopo = 0.0;
-        }
+            // Original mesh point
+            point pEval = mesh.points()[pointi];
 
-        Info << "z=0 faces " << globalBottomCentresAreas.size() << endl;
+            z0Points_deformedZ[pointi].z() = 0.0;
+            z0Points_areas[pointi] = 0.0;
 
-        pointField zeroPoints(mesh.points());
-        pointField pDeform(0.0 * zeroPoints);
-
-        const globalIndex globalPoints(mesh.nPoints());
-
-        // Local number of points and cells
-        label localNumPoints = mesh.points().size();
-
-        // Output the global number of points and cells
-        Info << "Local number of points: " << localNumPoints << endl;
-
-        reduce(localNumPoints, sumOp<scalar>()); // global sum
-
-        label globalNumPoints(localNumPoints);
-
-        // Output the global number of points and cells
-        Info << "Global number of points: " << globalNumPoints << endl << endl;
-
-        // Lists for the mesh points at z=0 and for the area and deformation at
-        // these points These lists are created for each processor
-        scalarList bottomPointsX;
-        scalarList bottomPointsY;
-        scalarList bottomPointsZ;
-        scalarList bottomPointsArea;
-        scalarList bottomPointsDz;
-        labelList localIdx;
-
-        point pEval(zeroPoints[0]);
-
-        // Loop over the points with z=0 to compute the deformation from the
-        // face centers
-        forAll(pDeform, pointi)
-        {
-            pEval = mesh.points()[pointi];
-
-            if (mag(pEval.z()) < 1e-2*distThr)
+            if (mag(pEval.z()) < 1e-2 * distThr)
             {
-                Tuple2<scalar, scalar> result;
+                Tuple2<scalar, scalar> result =
+                    inverseDistanceInterpolationDzBottom(
+                        pEval,
+                        globalBottomCentresX_agg,
+                        globalBottomCentresY_agg,
+                        globalBottomCentresDz_agg,
+                        globalBottomCentresAreas_agg,
+                        interpRelRadius,
+                        distThr);
 
-                result = inverseDistanceInterpolationDzBottom(
-                    pEval,
-                    globalBottomCentresX,
-                    globalBottomCentresY,
-                    globalBottomCentresDz,
-                    globalBottomCentresAreas,
-                    interpRelRadius,
-                    distThr);
-
-                scalar interpDz = result.first();
-                scalar interpArea = result.second();
-
-                bottomPointsX.append(pEval.x());
-                bottomPointsY.append(pEval.y());
-                bottomPointsZ.append(0.0);
-                bottomPointsArea.append(interpArea);
-                bottomPointsDz.append(interpDz);
-                localIdx.append(pointi);
-
-                zeroPoints[pointi].z() = interpDz;
+                z0Points_deformedZ[pointi].z() = result.first();
+                z0Points_areas[pointi] = result.second();
+                localNumZ0Points++;
             }
         }
 
-        //---------------------------------------------------------------------------//
+        Info << "sum(globalDzFace) " << sum(globalBottomCentresDz_agg) << endl;
+        Info << "sum(globalAreasFace) " << sum(globalBottomCentresAreas_agg)
+             << endl;
 
-        scalarField dxBottom(z0FaceIndices.size());
-        scalarField dyBottom(z0FaceIndices.size());
+
+        // PASSO 2b: Calculate Orthogonal Correction (Dx/Dy) for Z=0 Faces using
+        // Z-deformed points
+        // We generate the dx/dy for FACES based on the *deformed*
+        // z0Points. These will be aggregated and then interpolated to z=0 MESH
+        // POINTS.
+
+        scalarField dxFaceNormals_local(z0FaceIndices.size());
+        scalarField dyFaceNormals_local(z0FaceIndices.size());
 
         if (orthogonalCorrection)
         {
-            // Loop over the faces to compute the x,y components of normal unit
-            // vector
+            Info << "Calculating orthogonal correction Dx/Dy for z=0 faces "
+                    "using Z-deformed points..."
+                 << endl;
+            // Calculate face normals using the z0Points_deformedZ for
+            // connectivity
             forAll(z0FaceIndices, facei)
             {
                 const face& f = faces[z0FaceIndices[facei]];
-                // Compute an estimate of the centre as the average of the
-                // points
+
+                // Using the calculateFlatness logic with
+                // z0Points_deformedZ
                 point pAvg = Zero;
                 forAll(f, fp)
                 {
-                    pAvg += zeroPoints[f[fp]];
-                }
+                    pAvg += z0Points_deformedZ[f[fp]];
+                } // Use deformed Z points
                 pAvg /= f.size();
 
-                // Compute the face area normal and unit normal
                 vector sumA = Zero;
                 forAll(f, fp)
                 {
-                    const point& p = zeroPoints[f[fp]];
-                    const point& pNext = zeroPoints[f.nextLabel(fp)];
+                    const point& p = z0Points_deformedZ[f[fp]];
+                    const point& pNext = z0Points_deformedZ[f.nextLabel(fp)];
                     const vector a = (pNext - p) ^ (pAvg - p);
                     sumA += a;
                 }
@@ -1286,374 +1514,309 @@ int main(int argc, char* argv[])
 
                 if (sumAHat.z() < 0.0)
                 {
-                    dxBottom[facei] = -sumAHat.x();
-                    dyBottom[facei] = -sumAHat.y();
+                    dxFaceNormals_local[facei] = -sumAHat.x();
+                    dyFaceNormals_local[facei] = -sumAHat.y();
                 }
                 else
                 {
-                    dxBottom[facei] = sumAHat.x();
-                    dyBottom[facei] = sumAHat.y();
+                    dxFaceNormals_local[facei] = sumAHat.x();
+                    dyFaceNormals_local[facei] = sumAHat.y();
                 }
             }
         }
         else
         {
-            dxBottom = 0.0;
-            dyBottom = 0.0;
+            dxFaceNormals_local = 0.0;
+            dyFaceNormals_local = 0.0;
         }
 
-        List<scalarField> Dx(Pstream::nProcs());
-        Dx[Pstream::myProcNo()].setSize(dxBottom.size(), Pstream::myProcNo());
+        // Aggregate Dx interpolated from face normals
+        List<scalarField> allProcFaceDxNormals(Pstream::nProcs());
+        allProcFaceDxNormals[Pstream::myProcNo()] = dxFaceNormals_local;
+        Pstream::gatherList<scalarField>(allProcFaceDxNormals);
+        Pstream::scatterList<scalarField>(allProcFaceDxNormals);
 
-        List<scalarField> Dy(Pstream::nProcs());
-        Dy[Pstream::myProcNo()].setSize(dyBottom.size(), Pstream::myProcNo());
+        // Aggregate Dy interpolated from face normals
+        List<scalarField> allProcFaceDyNormals(Pstream::nProcs());
+        allProcFaceDyNormals[Pstream::myProcNo()] = dyFaceNormals_local;
+        Pstream::gatherList<scalarField>(allProcFaceDyNormals);
+        Pstream::scatterList<scalarField>(allProcFaceDyNormals);
 
-        // Each processor populate its field in the list of fields
-        for (label i = 0; i < dyBottom.size(); ++i)
-        {
-            Dx[Pstream::myProcNo()][i] = dxBottom[i];
-            Dy[Pstream::myProcNo()][i] = dyBottom[i];
-        }
-
-        Pstream::gatherList<scalarField>(Dx);
-        Pstream::scatterList<scalarField>(Dx);
-
-        Pstream::gatherList<scalarField>(Dy);
-        Pstream::scatterList<scalarField>(Dy);
-
-        // Create the global fields
-        scalarField globalBottomCentresDx;
-        scalarField globalBottomCentresDy;
-
+        scalarField globalFaceCentresDx_agg;
+        scalarField globalFaceCentresDy_agg;
         for (label i = 0; i < Pstream::nProcs(); ++i)
         {
-            globalBottomCentresDx.append(Dx[i]);
-            globalBottomCentresDy.append(Dy[i]);
+            globalFaceCentresDx_agg.append(allProcFaceDxNormals[i]);
+            globalFaceCentresDy_agg.append(allProcFaceDyNormals[i]);
         }
+        Info << "Aggregated z=0 face Dx/Dy (from deformed Z-points) count: "
+             << globalFaceCentresDx_agg.size() << endl;
 
-        scalarList bottomPointsDx;
-        scalarList bottomPointsDy;
+        // --- Calcola i fattori di normalizzazione per i mesh points ---
+        const labelList nProcsPerMeshPoint = countProcessorsPerMeshPoint(mesh);
 
-        // Loop over the points with z=0 to interpolate the x,y components of
-        // normal unit vector from the face centers
-        forAll(pDeform, pointi)
+
+        // --- SECTION 3: GLOBAL INTERPOLATION SOURCE PREPARATION (REPRODUCIBLE)
+        // --- This is the core new logic to build a reproducible
+        // list of sources for the final mesh point deformation.
+
+        // Local list of source points for this processor
+        label localNumTopCenters = patchTop.size();
+        List<InterpolationSource> rawSources(localNumZ0Points
+                                             + localNumTopCenters);
+
+        // Index to fill rawSources sequentially
+        label currentRawSourcesIdx = 0;
+
+        // PASSO 1: Populate rawSources with MESH POINTS at z=0 (after initial
+        // Z-deformation)
+        Info << "Populating rawSources with z=0 mesh points (final Dz, Dx, "
+                "Dy)..."
+             << endl;
+
+        // Iterate over all LOCAL mesh points of this processor
+        forAll(mesh.points(), pointi)
         {
-            pEval = mesh.points()[pointi];
+            // Original mesh point (X,Y,Z original)
+            point pEval_original = mesh.points()[pointi];
 
-            if (mag(pEval.z()) < 1e-2*distThr)
+            if (mag(pEval_original.z()) < 1e-2 * distThr)
             {
-                Tuple2<scalar, scalar> result;
+                scalar dzValue = z0Points_deformedZ[pointi].z();
+                scalar areaValue = z0Points_areas[pointi];
 
-                result =
-                    inverseDistanceInterpolationDzBottom(pEval,
-                                                         globalBottomCentresX,
-                                                         globalBottomCentresY,
-                                                         globalBottomCentresDx,
-                                                         globalBottomCentresDy,
-                                                         interpRelRadius,
-                                                         distThr);
+                scalar interpDx_z0 = 0.0;
+                scalar interpDy_z0 = 0.0;
+                if (orthogonalCorrection)
+                {
+                    Tuple2<scalar, scalar> dxdyResult =
+                        inverseDistanceInterpolationDzBottom(
+                            pEval_original,
+                            globalBottomCentresX_agg,
+                            globalBottomCentresY_agg,
+                            globalFaceCentresDx_agg,
+                            globalFaceCentresDy_agg,
+                            interpRelRadius,
+                            distThr);
+                    interpDx_z0 = dxdyResult.first();
+                    interpDy_z0 = dxdyResult.second();
+                }
 
-                bottomPointsDx.append(result.first());
-                bottomPointsDy.append(result.second());
+                const scalar normFactor =
+                    1.0 / scalar(nProcsPerMeshPoint[pointi]);
+
+                InterpolationSource s;
+                // X,Y,Z original for the source point
+                s.pCoords = pEval_original;
+
+                // The deformation value (delta Z)
+                s.dz = dzValue;
+
+                // Derived dx for z=0 points
+                s.dx = interpDx_z0;
+
+                // Derived dy for z=0 points
+                s.dy = interpDy_z0;
+
+                s.area = areaValue * normFactor;
+                s.isTopCentre = false;
+
+                rawSources[currentRawSourcesIdx++] = s;
             }
         }
 
-        //---------------------------------------------------------------------------//
+        // Sout << "Proc" << Pstream::myProcNo()
+        //      << "Finished populating rawSources with z=0 mesh points. Count:
+        //      "
+        //      << rawSources.size() << endl;
 
-        // Create list of labels in the original global mesh
-        labelList globalIdx(localIdx.size());
-        forAll(localIdx, pointi)
+        const label totalZ0PointsBeforeGlobalDeduplication =
+            returnReduce(localNumZ0Points, sumOp<label>());
+
+        Info << "Total z=0 points before global de-duplication (sum of local "
+                "counts): "
+             << totalZ0PointsBeforeGlobalDeduplication << endl;
+
+
+        // PASSO 2: Populate rawSources with TOP FACE CENTERS
+        // Retrieve the patchID - ORIGINAL CODE
+
+        // maxTopo must be defined here after globalBottomCentresDz_agg is
+        // populated
+        if (raiseTop)
         {
-            globalIdx[pointi] = globalPoints.toGlobal(pointi);
+            maxTopo = max(globalBottomCentresDz_agg);
+        }
+        else
+        {
+            maxTopo = 0.0;
         }
 
-        // syncTools::syncPointList(
-        //     mesh, localIdx, globalIdx, minEqOp<label>(), labelMax);
-
-        Sout << "Proc" << Pstream::myProcNo() << " z=0 points "
-             << bottomPointsArea.size() << endl;
-
-        // Local number of points and cells
-        label globalZ0Points = bottomPointsArea.size();
-
-        reduce(globalZ0Points, sumOp<scalar>()); // global sum
-
-        Info << "Total z=0 points " << globalZ0Points << endl;
-
-        // Start the computation of mesh deformation for top face centres
-        word patchName = "top";
-
-        // Find the ID# associated with the patchName by iterating through
-        // boundaryMesh
-        label patchID = -1;
-        forAll(mesh.boundaryMesh(), patchi)
-        {
-            if (mesh.boundaryMesh()[patchi].name() == patchName)
-            {
-                patchID = patchi;
-                break;
-            }
-        }
-
-        if (patchID == -1)
-        {
-            FatalErrorInFunction << "Patch " << patchName
-                                 << " not found in mesh." << exit(FatalError);
-        }
-
-        // Access the patch
-        const fvPatch& patchTop = mesh.boundary()[patchID];
-
-        Sout << "Proc" << Pstream::myProcNo() << " zTop faces/points "
-             << patchTop.size() << endl;
-
-        // Local number of faces/points
-        label globalZtopPoints = patchTop.size();
-
-        // Global sum
-        reduce(globalZtopPoints, sumOp<scalar>());
-
-        Info << "Total z=zTop faces/points " << globalZtopPoints << endl;
-
-        label nGlobalPoints(globalZ0Points + globalZtopPoints);
-
-        Info << "Total interpolation points (including duplicated points) "
-             << nGlobalPoints << endl;
-
-        // Local lists for top interpolation points (centres of top faces)
-        scalarField topCentresX(patchTop.size());
-        scalarField topCentresY(patchTop.size());
-        scalarField topCentresZ(patchTop.size());
-        scalarField topCentresAreas(patchTop.size());
-        scalarField topCentresDz(patchTop.size());
-        scalarField topCentresDx(patchTop.size());
-        scalarField topCentresDy(patchTop.size());
-        labelField globalIdxTop(patchTop.size());
-
+        // Iterate over local top faces of this processor
         forAll(patchTop, facei)
         {
-            topCentresX[facei] = faceCentres[patchTop.start() + facei].x();
-            topCentresY[facei] = faceCentres[patchTop.start() + facei].y();
-            topCentresZ[facei] = faceCentres[patchTop.start() + facei].z();
-            topCentresAreas[facei] = magFaceAreas[patchTop.start() + facei];
-            topCentresDz[facei] = maxTopo;
-            topCentresDx[facei] = 0.0;
-            topCentresDy[facei] = 0.0;
-            globalIdxTop[facei] = -1;
+            InterpolationSource s;
+            s.pCoords =
+                faceCentres[patchTop.start()
+                            + facei]; // Original face center coordinates
+            s.dz = maxTopo;
+            s.dx = 0.0; // Top points have 0 horizontal deformation
+            s.dy = 0.0;
+            s.area = magFaceAreas[patchTop.start() + facei];
+            s.isTopCentre = true;
+            rawSources[currentRawSourcesIdx++] = s;
         }
-
-        // Create lists for sharing processors values for
-        // both the z=0 and z=zMax interpolation points
-
-        List<scalarField> concatenatedPointsX(Pstream::nProcs());
-        concatenatedPointsX[Pstream::myProcNo()].setSize(
-            bottomPointsDz.size() + topCentresDz.size(), Pstream::myProcNo());
-
-        List<scalarField> concatenatedPointsY(Pstream::nProcs());
-        concatenatedPointsY[Pstream::myProcNo()].setSize(
-            bottomPointsDz.size() + topCentresDz.size(), Pstream::myProcNo());
-
-        List<scalarField> concatenatedPointsZ(Pstream::nProcs());
-        concatenatedPointsZ[Pstream::myProcNo()].setSize(
-            bottomPointsDz.size() + topCentresDz.size(), Pstream::myProcNo());
-
-        List<scalarField> concatenatedDz(Pstream::nProcs());
-        concatenatedDz[Pstream::myProcNo()].setSize(
-            bottomPointsDz.size() + topCentresDz.size(), Pstream::myProcNo());
-
-        List<scalarField> concatenatedDx(Pstream::nProcs());
-        concatenatedDx[Pstream::myProcNo()].setSize(
-            bottomPointsDx.size() + topCentresDx.size(), Pstream::myProcNo());
-
-        List<scalarField> concatenatedDy(Pstream::nProcs());
-        concatenatedDy[Pstream::myProcNo()].setSize(
-            bottomPointsDy.size() + topCentresDy.size(), Pstream::myProcNo());
-
-        List<scalarField> concatenatedAreas(Pstream::nProcs());
-        concatenatedAreas[Pstream::myProcNo()].setSize(
-            bottomPointsDz.size() + topCentresDz.size(), Pstream::myProcNo());
-
-        List<labelField> concatenatedGlobalIndex(Pstream::nProcs());
-        concatenatedGlobalIndex[Pstream::myProcNo()].setSize(
-            bottomPointsDz.size() + topCentresDz.size(), Pstream::myProcNo());
-
-        // Copy the z=0 interpolation points into the new field
-        for (label i = 0; i < bottomPointsDz.size(); ++i)
+        // Corrected calculation for Info message, manual count needed
+        label numTopCenters = 0;
+        for (label i = 0; i < rawSources.size(); ++i)
         {
-            concatenatedPointsX[Pstream::myProcNo()][i] = bottomPointsX[i];
-            concatenatedPointsY[Pstream::myProcNo()][i] = bottomPointsY[i];
-            concatenatedPointsZ[Pstream::myProcNo()][i] = bottomPointsZ[i];
-            concatenatedAreas[Pstream::myProcNo()][i] = bottomPointsArea[i];
-            concatenatedDz[Pstream::myProcNo()][i] = bottomPointsDz[i];
-            concatenatedDx[Pstream::myProcNo()][i] = bottomPointsDx[i];
-            concatenatedDy[Pstream::myProcNo()][i] = bottomPointsDy[i];
-            concatenatedGlobalIndex[Pstream::myProcNo()][i] = globalIdx[i];
+            if (rawSources[i].isTopCentre) numTopCenters++;
         }
+        // Sout << "Proc" << Pstream::myProcNo()
+        //      << "Finished preparing local top face centers. Count: "
+        //      << numTopCenters << endl;
 
-        // Copy the z=zMax interpolation points into the new field,
-        // starting after the end of the first
-        for (label i = 0; i < topCentresX.size(); ++i)
+        const label totalTopPointsBeforeGlobalDeduplication =
+            returnReduce(numTopCenters, sumOp<label>());
+
+        Info << "Total top points before global de-duplication (sum of local "
+                "counts): "
+             << totalTopPointsBeforeGlobalDeduplication << endl;
+
+
+        // --- END OF LOCAL INTERPOLATION SOURCE PREPARATION ---
+
+
+        // --- START OF GLOBAL AGGREGATION AND CANONICAL SORTING (REPRODUCIBLE)
+        // ---
+
+        // PASSO 3: Aggregate all rawSources from all processors
+        Info << "Aggregating local interpolation sources from all processors..."
+             << endl;
+        List<List<InterpolationSource>> allProcRawSources(Pstream::nProcs());
+        allProcRawSources[Pstream::myProcNo()] = rawSources;
+
+        Pstream::gatherList<List<InterpolationSource>>(allProcRawSources);
+        Pstream::scatterList<List<InterpolationSource>>(allProcRawSources);
+
+        label actualTotalAggregatedSources = 0;
+        forAll(allProcRawSources, procI)
         {
-            concatenatedPointsX[Pstream::myProcNo()][i + bottomPointsX.size()] =
-                topCentresX[i];
-            concatenatedPointsY[Pstream::myProcNo()][i + bottomPointsY.size()] =
-                topCentresY[i];
-            concatenatedPointsZ[Pstream::myProcNo()][i + bottomPointsZ.size()] =
-                noDeformLevel;
-            concatenatedAreas[Pstream::myProcNo()]
-                             [i + bottomPointsArea.size()] = topCentresAreas[i];
-            concatenatedDx[Pstream::myProcNo()][i + bottomPointsDx.size()] =
-                topCentresDx[i];
-            concatenatedDy[Pstream::myProcNo()][i + bottomPointsDy.size()] =
-                topCentresDy[i];
-            concatenatedDz[Pstream::myProcNo()][i + bottomPointsDz.size()] =
-                topCentresDz[i];
-            concatenatedGlobalIndex[Pstream::myProcNo()]
-                                   [i + bottomPointsDz.size()] =
-                                       globalIdxTop[i];
+            actualTotalAggregatedSources += allProcRawSources[procI].size();
         }
+        Info << "Aggregation complete. Total number of sources before GLOBAL "
+                "de-duplication: "
+             << actualTotalAggregatedSources << endl;
 
-        // Gather values from other processors
-        Pstream::gatherList<scalarField>(concatenatedPointsX);
-        Pstream::gatherList<scalarField>(concatenatedPointsY);
-        Pstream::gatherList<scalarField>(concatenatedPointsZ);
-        Pstream::gatherList<scalarField>(concatenatedAreas);
-        Pstream::gatherList<scalarField>(concatenatedDz);
-        Pstream::gatherList<scalarField>(concatenatedDx);
-        Pstream::gatherList<scalarField>(concatenatedDy);
-        Pstream::gatherList<labelField>(concatenatedGlobalIndex);
 
-        // Scatter values from other processors
-        Pstream::scatterList<scalarField>(concatenatedPointsX);
-        Pstream::scatterList<scalarField>(concatenatedPointsY);
-        Pstream::scatterList<scalarField>(concatenatedPointsZ);
-        Pstream::scatterList<scalarField>(concatenatedAreas);
-        Pstream::scatterList<scalarField>(concatenatedDz);
-        Pstream::scatterList<scalarField>(concatenatedDx);
-        Pstream::scatterList<scalarField>(concatenatedDy);
-        Pstream::scatterList<labelField>(concatenatedGlobalIndex);
+        // --- NUOVO: Semplificazione della combinazione delle sorgenti senza
+        // pre-de-duplicazione --- Ora, semplicemente copiamo tutti gli elementi
+        // aggregati in una singola lista La de-duplicazione efficace avverrà
+        // DOPO l'ordinamento (nel PASSO 4a).
+        List<InterpolationSource> finalGlobalSources(
+            actualTotalAggregatedSources); // Pre-allocata alla dimensione
+                                           // totale
 
-        // List of interpolation points merged from all the processors
-        // containing the z=0 mesh points and the z=zMax face centres
-        scalarField globalPointsX(nGlobalPoints);
-        scalarField globalPointsY(nGlobalPoints);
-        scalarField globalPointsZ(nGlobalPoints);
-        scalarField globalDz(nGlobalPoints);
-        scalarField globalDx(nGlobalPoints);
-        scalarField globalDy(nGlobalPoints);
-        scalarField globalAreas(nGlobalPoints);
-
-        // Bool for points alreay added
-        boolList addedPoint(globalNumPoints, false);
-
-        label totPoints(0);
-
-        // Loop over processors to create global list without duplicated points
-        for (label i = 0; i < Pstream::nProcs(); ++i)
+        label currentFinalIdx = 0;
+        forAll(allProcRawSources, procI)
         {
-            Info << "Merging proc " << i << endl;
-            forAll(concatenatedDz[i], pi)
+            forAll(allProcRawSources[procI], srcI)
             {
-                // The points belonging to more than one processor
-                // should not be added twice
-                // "accept" becomes false when the point already exists
-                label globalI = concatenatedGlobalIndex[i][pi];
-
-                bool accept(true);
-
-                if (globalI >= 0)
-                {
-                    if (addedPoint[globalI])
-                    {
-                        accept = false;
-                    }
-                    else
-                    {
-                        addedPoint[globalI] = true;
-                    }
-                }
-
-                if (accept)
-                {
-                    globalPointsX[totPoints] = concatenatedPointsX[i][pi];
-                    globalPointsY[totPoints] = concatenatedPointsY[i][pi];
-                    globalPointsZ[totPoints] = concatenatedPointsZ[i][pi];
-                    globalDz[totPoints] = concatenatedDz[i][pi];
-                    globalDx[totPoints] = concatenatedDx[i][pi];
-                    globalDy[totPoints] = concatenatedDy[i][pi];
-                    globalAreas[totPoints] = concatenatedAreas[i][pi];
-                    totPoints++;
-                }
+                finalGlobalSources[currentFinalIdx++] =
+                    allProcRawSources[procI][srcI];
             }
         }
 
-        // Reset the size of the field
-        globalPointsX.setSize(totPoints);
-        globalPointsY.setSize(totPoints);
-        globalPointsZ.setSize(totPoints);
-        globalDz.setSize(totPoints);
-        globalDx.setSize(totPoints);
-        globalDy.setSize(totPoints);
-        globalAreas.setSize(totPoints);
+        Info << "Combined all aggregated sources into a single list. Total "
+                "count: "
+             << finalGlobalSources.size() << endl;
 
-        Info << "Global points for deformation " << totPoints << endl;
 
-        // Compute the deformation parameter alpha
-        // as in Eq.5 from Luke et al. 2012
-        scalar gamma = 5.0;
-        scalarField a_n(globalAreas / sum(globalAreas));
-        scalar dzMean(sum(a_n * globalDz));
-        scalar alphaAll = gamma / Ldef * max(mag(globalDz - dzMean));
+        // PASSO 4: Sort the combined list of sources in a canonical way
+        // Criterio: isTopCentre (false prima di true), poi X, poi Y.
+        Info << "Sorting global interpolation sources canonically "
+                "(isTopCentre, then X, then Y)..."
+             << endl;
+        std::sort(finalGlobalSources.begin(),
+                  finalGlobalSources.end(),
+                  [](const InterpolationSource& a, const InterpolationSource& b)
+                  {
+                      if (a.isTopCentre != b.isTopCentre)
+                          return a.isTopCentre < b.isTopCentre;
+                      if (a.pCoords.x() != b.pCoords.x())
+                          return a.pCoords.x() < b.pCoords.x();
+                      return a.pCoords.y() < b.pCoords.y();
+                  });
+        Info << "Sorting complete." << endl;
 
-        Info << "alpha " << alphaAll << endl;
+        // PASSO 5: Popula le scalarField globali finali dalle sorgenti
+        // normalizzate
+        globalPointsX.setSize(finalGlobalSources.size());
+        globalPointsY.setSize(finalGlobalSources.size());
+        globalPointsZ.setSize(finalGlobalSources.size());
+        globalDz.setSize(finalGlobalSources.size());
+        globalDx.setSize(finalGlobalSources.size());
+        globalDy.setSize(finalGlobalSources.size());
+        globalAreas.setSize(finalGlobalSources.size());
 
-        scalar interpDz(0.0);
-        scalar interpDx(0.0);
-        scalar interpDy(0.0);
+        forAll(finalGlobalSources, i)
+        {
+            globalPointsX[i] = finalGlobalSources[i].pCoords.x();
+            globalPointsY[i] = finalGlobalSources[i].pCoords.y();
+            globalPointsZ[i] = finalGlobalSources[i].pCoords.z();
+            globalDz[i] = finalGlobalSources[i].dz;
+            globalDx[i] = finalGlobalSources[i].dx;
+            globalDy[i] = finalGlobalSources[i].dy;
+            globalAreas[i] = finalGlobalSources[i].area;
+        }
 
-        point DeltaInterp;
+        Info << "Final global points for deformation (with fractional "
+                "normalization): "
+             << finalGlobalSources.size() << endl;
+
+        // --- ADAPTATION OF pDeform CALCULATION LOOP ---
+        pointField pDeform(0.0 * mesh.points());
 
         const label totalPoints = mesh.points().size();
         label maxTotalPoints = totalPoints;
         reduce(maxTotalPoints, maxOp<label>());
 
-        label localCount = 0; // Count of processed points by this processor
-
+        label localCount = 0;
         scalar nextPctg(1.0);
-        scalar percentage(0.0);
 
         scalar dxMin_rel;
         scalar dxMax_rel;
-
         scalar dyMin_rel;
         scalar dyMax_rel;
-
         scalar xCoeff;
         scalar yCoeff;
-
         scalar distC;
         scalar distCoeff;
-
         scalar coeffHor;
-
         Tuple2<scalar, scalar> result;
 
-        // Loop over all points in the mesh to interpolate vertical deformation
+        // Calculate alphaAll here, after globalDz/globalAreas are ready
+        scalar gamma = 5.0;
+        Info << "sum(globalAreas) " << sum(globalAreas) << endl;
+        Info << "sum(globalDz) " << sum(globalDz) << endl;
+
+        scalar dzMean(sum(globalAreas / sum(globalAreas) * globalDz));
+        alphaAll = gamma / Ldef * max(mag(globalDz - dzMean));
+        Info << "alpha " << alphaAll << endl;
+
+
+        // Loop over all points in the mesh to interpolate deformation
+        Info
+            << "Starting point deformation interpolation for all mesh points..."
+            << endl;
         forAll(pDeform, pointi)
         {
             localCount++;
-            percentage = 100.0 * static_cast<scalar>(localCount) / totalPoints;
 
             // The percentage is computed with respect to the maximum number
             // of points among all the processors
             scalar GlobalPercentage =
                 100.0 * static_cast<scalar>(localCount) / maxTotalPoints;
-
-            if (percentage >= 100.0)
-            {
-                Sout << "Proc" << Pstream::myProcNo()
-                     << " deformation completed" << endl;
-            }
 
             if (GlobalPercentage >= nextPctg)
             {
@@ -1661,9 +1824,15 @@ int main(int argc, char* argv[])
                 nextPctg += 1.0;
             }
 
-            pEval = mesh.points()[pointi];
+            // Use original mesh point for evaluation
+            point pEval = mesh.points()[pointi];
 
-            if (mag(pEval.z() - zMax) < 1e-2*distThr)
+            scalar interpDz(0.0);
+            scalar interpDx(0.0);
+            scalar interpDy(0.0);
+            point DeltaInterp;
+
+            if (mag(pEval.z() - zMax) < 1e-2 * distThr)
             {
                 interpDz = maxTopo;
                 interpDx = 0.0;
@@ -1671,34 +1840,45 @@ int main(int argc, char* argv[])
             }
             else
             {
-                if (pEval.z() < 1e-2*distThr)
+                if (pEval.z() < 1e-2 * distThr)
                 {
-                    // New: Compute horizontal deformation using zNeg, dxNeg,
-                    // dyNeg
                     Tuple2<scalar, scalar> negDeform =
                         interpolateNegDeformation(
                             pEval.z(), useNegDeformation, zNeg, dxNeg, dyNeg);
                     interpDx = negDeform.first();
                     interpDy = negDeform.second();
 
+                    point pEval_2D = pEval;
                     // For points on or below the topography consider only (x,y)
-                    pEval.z() = 0.0;
+                    pEval_2D.z() = 0.0;
 
-                    result = inverseDistanceInterpolationDzBottom(
-                        pEval,
-                        globalBottomCentresX,
-                        globalBottomCentresY,
-                        globalBottomCentresDz,
-                        globalBottomCentresAreas,
-                        interpRelRadius,
-                        distThr);
-
+                    result =
+                        inverseDistanceInterpolationDzBottom(pEval_2D,
+                                                             globalPointsX,
+                                                             globalPointsY,
+                                                             globalDz,
+                                                             globalAreas,
+                                                             interpRelRadius,
+                                                             distThr);
                     interpDz = result.first();
+
+                    if (orthogonalCorrection)
+                    {
+                        Tuple2<scalar, scalar> dxdyFromSources =
+                            inverseDistanceInterpolationDzBottom(
+                                pEval_2D,
+                                globalPointsX,
+                                globalPointsY,
+                                globalDx,
+                                globalDy,
+                                interpRelRadius,
+                                distThr);
+                        interpDx += dxdyFromSources.first();
+                        interpDy += dxdyFromSources.second();
+                    }
                 }
                 else
                 {
-                    // Interpolation based on full 3D weighted inverse distance
-
                     DeltaInterp =
                         inverseDistanceInterpolationDz(Ldef,
                                                        alphaAll,
@@ -1729,11 +1909,10 @@ int main(int argc, char* argv[])
                 }
             }
 
-            if (pEval.z() > 1e-2*distThr)
+            if (pEval.z() > 1e-2 * distThr)
             {
                 dxMin_rel = (pEval.x() - xMin) / (xMax - xMin);
                 dxMax_rel = (xMax - pEval.x()) / (xMax - xMin);
-
                 dyMin_rel = (pEval.y() - yMin) / (yMax - yMin);
                 dyMax_rel = (yMax - pEval.y()) / (yMax - yMin);
 
@@ -1769,27 +1948,22 @@ int main(int argc, char* argv[])
             }
             pDeform[pointi].z() = interpDz;
         }
-        
-        // 1. Calculate the new proposed point positions in a temporary field.
-        //    We are not modifying the mesh itself yet.
+        Info << "Finished point deformation interpolation." << endl;
+
+        // Calculate the new proposed point positions in a temporary field.
+        // We are not modifying the mesh itself yet.
         tmp<pointField> tnewPoints = mesh.points() + pDeform;
 
-        // 2. Synchronize the positions of shared points across processors.
-        //    For each boundary point, this calculates the average of the positions
-        //    proposed by each processor that shares the point.
-        //    This "stitches" the mesh back together and eliminates discrepancies.
+        // Synchronize the positions of shared points across processors.
+        // For each boundary point, this calculates the average of the positions
+        // proposed by each processor that shares the point.
+        // This "stitches" the mesh back together and eliminates discrepancies.
         syncTools::syncPointPositions(
-            mesh,
-            tnewPoints.ref(),
-            maxOp<point>(),
-            point::zero
-        );
+            mesh, tnewPoints.ref(), maxOp<point>(), point::zero);
 
-        // 3. Now that the new positions are consistent, update the mesh.
-        //    We use movePoints, which is more robust than setPoints for this.
-        mesh.movePoints(tnewPoints());        
-        
-        // mesh.setPoints(mesh.points() + pDeform);
+        // Now that the new positions are consistent, update the mesh.
+        // We use movePoints, which is more robust than setPoints for this.
+        mesh.movePoints(tnewPoints());
 
         Sout << "Proc" << Pstream::myProcNo() << " mesh updated" << endl;
 
@@ -1869,17 +2043,41 @@ int main(int argc, char* argv[])
 
         // --- 0: Identify all boundary points that must remain fixed ---
         Info << "Identifying fixed boundary points..." << endl;
-        boolList isBoundaryPoint(mesh.nPoints(), false);
-        forAll(mesh.boundaryMesh(), patchI)
+        boolList isBoundaryPoint(
+            mesh.nPoints(),
+            false); // Lista di flag per tutti i punti locali della mesh
+        forAll(mesh.boundaryMesh(),
+               patchI) // Itera su TUTTI i patch di confine locali
         {
             const polyPatch& pp = mesh.boundaryMesh()[patchI];
-            Info << "  - Considering patch '" << pp.name()
-                 << "' (type: " << pp.type() << ") as a fixed boundary."
-                 << endl;
-            const labelUList& meshPts = pp.meshPoints();
-            forAll(meshPts, i)
+
+            // --- NUOVA LOGICA: Filtra i patch per tipo ---
+            // Un patch è "fisso" se NON è un processorPolyPatch.
+            // Quindi, include i patch fisici e i cyclicPolyPatch.
+            if (!isA<processorPolyPatch>(pp))
             {
-                isBoundaryPoint[meshPts[i]] = true;
+                // Se non è un processorPolyPatch, allora è un patch fisico
+                // (wall, inlet, outlet, top, bottom) o un cyclicPolyPatch. I
+                // suoi punti devono rimanere fissi.
+                Info << "  - Considering patch '" << pp.name()
+                     << "' (type: " << pp.type()
+                     << ") as a fixed boundary (physical or cyclic)." << endl;
+                const labelUList& meshPts =
+                    pp.meshPoints(); // Punti della patch attuale (indici
+                                     // locali)
+                forAll(
+                    meshPts,
+                    i) // Itera su tutti i punti che appartengono a questa patch
+                {
+                    isBoundaryPoint[meshPts[i]] =
+                        true; // Marca il punto come "boundary point"
+                }
+            }
+            else // Caso else: è un processorPolyPatch
+            {
+                Info << "  - Patch '" << pp.name() << "' (type: " << pp.type()
+                     << ") is a processor boundary. Points are NOT fixed here."
+                     << endl;
             }
         }
 
@@ -1891,7 +2089,7 @@ int main(int argc, char* argv[])
 
         // --- BEST MESH LOGIC: Initialize tracking variables ---
         scalar initialMinOrtho = GREAT;
-        for (label faceI = 0; faceI < mesh.nInternalFaces(); ++faceI)
+        for (label faceI = 0; faceI < mesh.nFaces(); ++faceI)
         {
             initialMinOrtho = min(initialMinOrtho, ortho[faceI]);
         }
@@ -1899,6 +2097,11 @@ int main(int argc, char* argv[])
 
         pointField bestPoints = mesh.points();
         scalar bestMinOrtho = initialMinOrtho;
+
+        const scalarList normFactors = calculateEdgeNormFactors(mesh);
+        const scalarList neighbourCount_points =
+            calculateNeighbourCount(mesh, normFactors);
+        const scalarList neighbourCount_cells = calculateGlobalCellCount(mesh);
 
         if (Pstream::master())
         {
@@ -1923,7 +2126,8 @@ int main(int argc, char* argv[])
                 // ======================================================= //
 
                 // --- BEST MESH LOGIC: Revert to best state before Laplacian
-                // step ---
+                // step --- Questo blocco rimane invariato e funziona come da
+                // tua logica originale.
                 if (Pstream::master())
                 {
                     scalar bestAngleSoFar = Foam::radToDeg(
@@ -1939,7 +2143,8 @@ int main(int argc, char* argv[])
                     const_cast<pointField&>(mesh.points()),
                     minOp<point>(),
                     point(great, great, great));
-                mesh.clearGeom();
+                mesh.clearGeom(); // Assicurati che mesh.clearGeom() sia sicuro
+                                  // qui
                 // --- END OF BEST MESH LOGIC ---
 
                 if (Pstream::master())
@@ -1950,6 +2155,25 @@ int main(int argc, char* argv[])
                         << endl;
                 }
 
+                // --- 1. Calcolo dei Punti Target Laplaciani (Point-based) ---
+                // La funzione laplacianPointSmoothing_Final restituisce i punti
+                // target Laplaciani. Questa sostituisce la logica di calcolo di
+                // P_laplacian nel loop.
+                tmp<pointField> tLaplacianTarget = getLaplacianTargetPoints(
+                    mesh, normFactors, neighbourCount_points);
+                const pointField& P_laplacian_target = tLaplacianTarget();
+
+
+                // --- 2. Calcolo dei Punti Target Centroidali (Cell-based) ---
+                // La funzione getCentroidalTargetPoints restituisce i punti
+                // target centroidali. Questa sostituisce la logica di calcolo
+                // di P_internal nel loop.
+                tmp<pointField> tCentroidalTarget = getCentroidalTargetPoints(
+                    mesh); // Passa il global cell count
+                const pointField& P_internal_target = tCentroidalTarget();
+
+
+                // --- 3. Calcolo dello Spostamento Proposto (Blended) ---
                 boolList pointsToMove(mesh.nPoints(), false);
                 forAll(pointsToMove, pI)
                 {
@@ -1960,9 +2184,6 @@ int main(int argc, char* argv[])
                 }
 
                 pointField proposedDisplacement(mesh.nPoints(), vector::zero);
-                const labelListList& pointPoints = mesh.pointPoints();
-                const labelListList& pointCells = mesh.pointCells();
-                const vectorField& cellCentres = mesh.cellCentres();
 
                 forAll(pointsToMove, pointI)
                 {
@@ -1970,51 +2191,38 @@ int main(int argc, char* argv[])
                     {
                         const point& currentPos = mesh.points()[pointI];
 
-                        const labelList& pPoints = pointPoints[pointI];
-                        point P_laplacian = point::zero;
-                        if (pPoints.size() > 0)
-                        {
-                            forAll(pPoints, i)
-                            {
-                                P_laplacian += mesh.points()[pPoints[i]];
-                            }
-                            P_laplacian /= pPoints.size();
-                        }
-                        else
-                        {
-                            P_laplacian = currentPos;
-                        }
-
-                        const labelList& pCells = pointCells[pointI];
-                        point P_internal = point::zero;
-                        if (pCells.size() > 0)
-                        {
-                            forAll(pCells, i)
-                            {
-                                P_internal += cellCentres[pCells[i]];
-                            }
-                            P_internal /= pCells.size();
-                        }
-                        else
-                        {
-                            P_internal = currentPos;
-                        }
-
+                        // P_laplacian_target e P_internal_target sono già i
+                        // punti target globalmente corretti
                         point P_ideal_blended =
-                            (1.0 - blendingFactor) * P_laplacian
-                            + blendingFactor * P_internal;
-                        proposedDisplacement[pointI] = laplacianRelaxFactor
+                            (1.0 - blendingFactor) * P_laplacian_target[pointI]
+                            + blendingFactor * P_internal_target[pointI];
+
+                        proposedDisplacement[pointI] =
+                            laplacianRelaxFactor
                             * (P_ideal_blended - currentPos);
                     }
                 }
 
-                syncTools::syncPointList(
-                    mesh, proposedDisplacement, sumOp<point>(), point::zero);
+                // Per garantire riproducibilità e coerenza, usiamo
+                // syncPointPositions con minOp o maxOp per l'applicazione degli
+                // spostamenti finali, come fai per la fine del loop main.
+                syncTools::syncPointList( // Questa è la prima sync per gli
+                                          // spostamenti
+                    mesh,
+                    proposedDisplacement,
+                    maxOp<point>(),
+                    point::zero); // Usiamo maxOp per determinismo come in
+                                  // syncPointPositions
+
                 const_cast<pointField&>(mesh.points()) += proposedDisplacement;
+
+                // Ultima sincronizzazione per assicurare la coerenza geometrica
+                // finale dei punti condivisi.
                 syncTools::syncPointPositions(
                     mesh,
                     const_cast<pointField&>(mesh.points()),
-                    minOp<point>(),
+                    minOp<point>(), // O maxOp, a seconda del determinismo
+                                    // desiderato
                     point(great, great, great));
             }
             else
@@ -2025,26 +2233,63 @@ int main(int argc, char* argv[])
 
                 scalar localMinOrtho = GREAT;
                 label localWorstFaceI = -1;
-                for (label faceI = 0; faceI < mesh.nInternalFaces(); ++faceI)
+                point localWorstFaceCentroid =
+                    point::max; // Inizializzato per la Z-coord
+
+                for (label faceI = 0; faceI < mesh.nFaces();
+                     ++faceI) // Loop su TUTTE le facce
                 {
                     if (ortho[faceI] < localMinOrtho)
                     {
                         localMinOrtho = ortho[faceI];
                         localWorstFaceI = faceI;
+                        localWorstFaceCentroid =
+                            mesh.faceCentres()[faceI]; // Salva il centroide
                     }
+                    // NOTA: Se ortho[faceI] == localMinOrtho (con precisione
+                    // floating point), localWorstFaceI e localWorstFaceCentroid
+                    // saranno determinati dal primo trovato. Il tie-breaker
+                    // globale risolverà qualsiasi potenziale differenza qui.
                 }
 
+                // --- FASE 1: Trova la non-ortogonalità minima globale ---
                 scalar globalMinOrtho = localMinOrtho;
                 reduce(globalMinOrtho, minOp<scalar>());
 
-                if (Pstream::master())
+
+                // --- FASE 2: Trova la coordinata Z minima tra le facce con
+                // globalMinOrtho ---
+                scalar localMinZCoord =
+                    GREAT; // Inizializza con un valore grande
+                if (localWorstFaceI != -1
+                    && mag(localMinOrtho - globalMinOrtho) < SMALL)
                 {
-                    scalar worstAngle = Foam::radToDeg(
-                        Foam::acos(max(-1.0, min(1.0, globalMinOrtho))));
-                    Info << "  Iteration " << iter + 1
-                         << " - Worst non-ortho: " << worstAngle
-                         << " deg. (Rotational step)" << endl;
+                    localMinZCoord = localWorstFaceCentroid.z();
                 }
+                scalar globalMinZCoord = localMinZCoord;
+                reduce(globalMinZCoord, minOp<scalar>());
+
+
+                // --- FASE 3: Trova il processore master tra quelli che
+                // soddisfano entrambi i criteri ---
+                label masterProcID = -1; // Default: nessun processore è master
+                if (localWorstFaceI != -1
+                    && mag(localMinOrtho - globalMinOrtho) < SMALL
+                    && mag(localMinZCoord - globalMinZCoord) < SMALL)
+                {
+                    masterProcID =
+                        Pstream::myProcNo(); // Questo processore è un candidato
+                    Sout << "myProc " << masterProcID << " localWorstFaceI "
+                         << localWorstFaceI << " localMinOrtho "
+                         << localMinOrtho << " localMinZCoord "
+                         << localMinZCoord << endl;
+                }
+                // Seleziona il processore con l'ID più basso tra i candidati
+                // (per determinismo) Se la tua implementazione MPI/OpenFOAM
+                // preferisce maxOp per il tie-breaker, usa quello. Usiamo minOp
+                // qui per il procID per un tie-breaker deterministico (es. proc
+                // 0, poi proc 1, ecc.)
+                reduce(masterProcID, maxOp<label>());
 
                 if (globalMinOrtho > qualityCosThreshold)
                 {
@@ -2052,12 +2297,6 @@ int main(int argc, char* argv[])
                          << endl;
                     break;
                 }
-
-                label masterProcID = -1;
-                if (localWorstFaceI != -1
-                    && mag(localMinOrtho - globalMinOrtho) < SMALL)
-                    masterProcID = Pstream::myProcNo();
-                reduce(masterProcID, maxOp<label>());
 
                 pointField displacement(mesh.nPoints(), vector::zero);
 
@@ -2068,8 +2307,13 @@ int main(int argc, char* argv[])
                     const point& ownC = mesh.cellCentres()[ownI];
                     point neiC;
 
+                    Sout << "Worst angle " << localMinOrtho
+                         << " Worst face center "
+                         << mesh.faceCentres()[worstFaceI] << endl;
+
                     if (worstFaceI >= mesh.nInternalFaces())
                     {
+                        Sout << "not internal face" << endl;
                         List<point> neighbourCellCentres;
                         syncTools::swapBoundaryCellPositions(
                             mesh, mesh.cellCentres(), neighbourCellCentres);
@@ -2078,6 +2322,7 @@ int main(int argc, char* argv[])
                     }
                     else
                     {
+                        Sout << "internal face" << endl;
                         neiC = mesh.cellCentres()
                                    [mesh.faceNeighbour()[worstFaceI]];
                     }
@@ -2102,16 +2347,6 @@ int main(int argc, char* argv[])
                                     totalCorrectionAngle, maxRotationAngleRad);
                                 quaternion R(normalised(axis),
                                              rotationStepAngle);
-
-                                if (Pstream::master())
-                                {
-                                    Info << "    - Correcting face "
-                                         << worstFaceI << ". Angle needed: "
-                                         << Foam::radToDeg(totalCorrectionAngle)
-                                         << " deg, applying: "
-                                         << Foam::radToDeg(rotationStepAngle)
-                                         << " deg." << endl;
-                                }
 
                                 const face& worstFace =
                                     mesh.faces()[worstFaceI];
@@ -2150,17 +2385,40 @@ int main(int argc, char* argv[])
 
             // --- BEST MESH LOGIC: Check and save if current state is better
             // ---
-            scalar currentMinOrtho = GREAT;
-            for (label faceI = 0; faceI < mesh.nInternalFaces(); ++faceI)
+
+            // --- NUOVO: Utilizza isMasterFace per il calcolo di
+            // currentMinOrtho ---
+            PackedBoolList isMasterFaceForBestMesh =
+                syncTools::getInternalOrMasterFaces(mesh);
+
+            scalar localMinOrthoForBestMesh = GREAT;
+            // Non c'è bisogno di tenere traccia di localWorstFaceI o centroidi
+            // qui, vogliamo solo il valore minimo globale `currentMinOrtho`.
+
+            // Itera su *TUTTE* le facce, ma considera solo quelle che sono
+            // `isMasterFace`.
+            for (label faceI = 0; faceI < mesh.nFaces(); ++faceI)
             {
-                currentMinOrtho = min(currentMinOrtho, ortho[faceI]);
+                if (isMasterFaceForBestMesh[faceI]) // Considera solo le facce
+                                                    // master/interne
+                {
+                    localMinOrthoForBestMesh =
+                        min(localMinOrthoForBestMesh, ortho[faceI]);
+                }
             }
-            reduce(currentMinOrtho, minOp<scalar>());
+            // --- FINE NUOVO CALCOLO LOCALE ---
+
+            // --- AGGREGAZIONE GLOBALE (ora su valori filtrati da isMasterFace)
+            // ---
+            scalar currentMinOrtho = localMinOrthoForBestMesh;
+            reduce(currentMinOrtho,
+                   minOp<scalar>()); // Questa riduzione è ora più robusta
 
             if (currentMinOrtho > bestMinOrtho)
             {
                 bestMinOrtho = currentMinOrtho;
-                bestPoints = mesh.points();
+                bestPoints =
+                    mesh.points(); // Salva lo stato corrente della mesh
                 if (Pstream::master())
                 {
                     scalar bestAngle = Foam::radToDeg(

@@ -199,9 +199,11 @@ def main():
     print(f"Grid definition mode selected: {grid_definition_mode}")
 
     xVent, yVent, DEMfile_name = read_topoGridDict("system/topoGridDict")
-    print('DEMfile_path from topoGridDict:', DEMfile_path)
 
     DEMfile_path = os.path.join(os.getcwd(), "constant", "DEM", DEMfile_name)
+
+    print('DEMfile_path from topoGridDict:', DEMfile_path)
+
     if not os.path.exists(DEMfile_path):
         raise FileNotFoundError(f"DEM file not found: {DEMfile_path}")
     print("DEMfile_path resolved to:", DEMfile_path)
