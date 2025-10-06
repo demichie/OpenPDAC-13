@@ -2566,7 +2566,11 @@ int main(int argc, char* argv[])
             }
             else
             {
-                Info << "currentMinOrtho " << currentMinOrtho << endl;
+                // Info << "currentMinOrtho " << currentMinOrtho << endl;
+                Info << "curretnMaxAngle "
+                     << Foam::radToDeg(
+                            Foam::acos(max(-1.0, min(1.0, currentMinOrtho))))
+                     << " deg." << endl;
             }
             // --- END OF BEST MESH LOGIC ---
         }
