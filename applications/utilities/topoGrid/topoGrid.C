@@ -226,6 +226,10 @@ tmp<pointField> getLaplacianTargetPoints(const fvMesh& mesh,
             targetPoints[pointI] = mesh.points()[pointI];
         }
     }
+
+    syncTools::syncPointPositions(
+        mesh, targetPoints, minOp<point>(), point(great, great, great));
+
     return tTargetPoints;
 }
 
@@ -2141,6 +2145,57 @@ int main(int argc, char* argv[])
         }
         // --- END OF BEST MESH LOGIC ---
 
+        /*
+        const point faceA_centroid(
+            -112.692518067, -229.315478954, 389.879622638);
+
+        label labelA = -1;
+        label procA = -1;
+
+        for (label faceI = 0; faceI < mesh.nFaces(); ++faceI)
+        {
+            const point& currentCentroid = mesh.faceCentres()[faceI];
+
+            // Controlliamo se la faccia attuale è una di quelle che
+            // cerchiamo
+            if (mag(currentCentroid - faceA_centroid) < 1e-4)
+            {
+                Sout << "Trovata Face A su proc " << Pstream::myProcNo()
+                     << " faccia " << faceI << endl;
+                labelA = faceI;
+                procA = Pstream::myProcNo();
+            }
+        }
+
+        reduce(procA, maxOp<label>());
+
+        const point faceB_centroid(
+            -201.182612077, -131.209119549, 373.489510406);
+
+        label labelB = -1;
+        label procB = -1;
+
+        for (label faceI = 0; faceI < mesh.nFaces(); ++faceI)
+        {
+            const point& currentCentroid = mesh.faceCentres()[faceI];
+
+            // Controlliamo se la faccia attuale è una di quelle che
+            // cerchiamo
+            if (mag(currentCentroid - faceB_centroid) < 1e-4)
+            {
+                Sout << "Trovata Face B su proc " << Pstream::myProcNo()
+                     << " faccia " << faceI << endl;
+                labelB = faceI;
+                procB = Pstream::myProcNo();
+            }
+        }
+
+        label labelA0 = -1;
+        label labelB0 = -1;
+
+        reduce(procB, maxOp<label>());
+        */
+
         // --- Main Hybrid Smoothing Loop ---
         for (int iter = 0; iter < nSmoothIter; ++iter)
         {
@@ -2166,6 +2221,45 @@ int main(int argc, char* argv[])
                          << bestAngleSoFar << " deg)"
                          << " before applying Laplacian smoothing." << endl;
                 }
+
+                /*
+                if (Pstream::myProcNo() == procB)
+                {
+                    const label worstFaceI = labelB;
+
+                    Sout << "faceB center " << mesh.faceCentres()[worstFaceI]
+                         << endl;
+
+                    const face& faceB = mesh.faces()[worstFaceI];
+                    forAll(faceB, fp)
+                    {
+                        label pI = faceB[fp];
+                        labelB0 = pI;
+                        const point& p = mesh.points()[pI];
+                        Sout << "pointB " << pI << " coords " << p << endl;
+                    }
+                }
+
+
+                if (Pstream::myProcNo() == procA)
+                {
+                    const label worstFaceI = labelA;
+
+                    Sout << "faceA center " << mesh.faceCentres()[worstFaceI]
+                         << endl;
+
+                    const face& faceA = mesh.faces()[worstFaceI];
+                    forAll(faceA, fp)
+                    {
+                        label pI = faceA[fp];
+                        labelA0 = pI;
+                        const point& p = mesh.points()[pI];
+                        Sout << "pointA " << pI << " coords " << p << endl;
+                    }
+                }
+                */
+
+
                 const_cast<pointField&>(mesh.points()) = bestPoints;
                 syncTools::syncPointPositions(
                     mesh,
@@ -2187,6 +2281,20 @@ int main(int argc, char* argv[])
                 tmp<pointField> tLaplacianTarget = getLaplacianTargetPoints(
                     mesh, normFactors, neighbourCount_points);
                 const pointField& P_laplacian_target = tLaplacianTarget();
+
+                /*
+                if (Pstream::myProcNo() == procA)
+                {
+                    Sout << "targetA " << labelA0 << " "
+                         << P_laplacian_target[labelA0] << endl;
+                }
+
+                if (Pstream::myProcNo() == procB)
+                {
+                    Sout << "targetB " << labelB0 << " "
+                         << P_laplacian_target[labelB0] << endl;
+                }
+                */
 
 
                 // --- 2. Compute Target Centroidal Points (Cell-based) ---
@@ -2226,8 +2334,24 @@ int main(int argc, char* argv[])
                 // --- 4. Sync the displacements among the processors
                 syncTools::syncPointList(mesh,
                                          proposedDisplacement,
-                                         plusEqOp<vector>(),
-                                         vector::zero);
+                                         minOp<point>(),
+                                         point(great, great, great));
+
+
+                /*
+                if (Pstream::myProcNo() == procA)
+                {
+                    Sout << "prop displA " << labelA0 << " "
+                         << proposedDisplacement[labelA0] << endl;
+                }
+
+                if (Pstream::myProcNo() == procB)
+                {
+                    Sout << "prop displB " << labelB0 << " "
+                         << proposedDisplacement[labelB0] << endl;
+                }
+                */
+
 
                 const_cast<pointField&>(mesh.points()) += proposedDisplacement;
 
