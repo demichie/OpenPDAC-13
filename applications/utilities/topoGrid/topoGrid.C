@@ -47,6 +47,35 @@ using namespace Foam;
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
+
+bool isProcessorFace(const Foam::polyMesh& mesh, const Foam::label faceI)
+{
+    // Primo, controlla se la faccia è interna. Se sì, non può essere una
+    // processor face.
+    if (faceI < mesh.nInternalFaces())
+    {
+        return false;
+    }
+
+    // Se la faccia non è interna, appartiene a una patch.
+    // Troviamo a quale patch appartiene.
+    const Foam::label patchID = mesh.boundaryMesh().whichPatch(faceI);
+
+    // Controlla se l'ID della patch è valido.
+    if (patchID == -1)
+    {
+        // Questo non dovrebbe accadere per una faccia di confine valida.
+        return false;
+    }
+
+    // Ottieni un riferimento alla patch...
+    const Foam::polyPatch& pp = mesh.boundaryMesh()[patchID];
+
+    // ...e controlla il suo tipo usando la macro isA<T>() di OpenFOAM.
+    // Se il tipo è processorPolyPatch, allora è una faccia tra processori.
+    return Foam::isA<Foam::processorPolyPatch>(pp);
+}
+
 /*
  * Calcola i fattori di normalizzazione per ogni edge (1.0 / N),
  * dove N è il numero di processori che condividono l'edge.
@@ -2143,8 +2172,7 @@ int main(int argc, char* argv[])
                     const_cast<pointField&>(mesh.points()),
                     minOp<point>(),
                     point(great, great, great));
-                mesh.clearGeom(); // Assicurati che mesh.clearGeom() sia sicuro
-                                  // qui
+                mesh.clearGeom();
                 // --- END OF BEST MESH LOGIC ---
 
                 if (Pstream::master())
@@ -2155,25 +2183,19 @@ int main(int argc, char* argv[])
                         << endl;
                 }
 
-                // --- 1. Calcolo dei Punti Target Laplaciani (Point-based) ---
-                // La funzione laplacianPointSmoothing_Final restituisce i punti
-                // target Laplaciani. Questa sostituisce la logica di calcolo di
-                // P_laplacian nel loop.
+                // --- 1. Compute Target Laplacian Points (Point-based) ---
                 tmp<pointField> tLaplacianTarget = getLaplacianTargetPoints(
                     mesh, normFactors, neighbourCount_points);
                 const pointField& P_laplacian_target = tLaplacianTarget();
 
 
-                // --- 2. Calcolo dei Punti Target Centroidali (Cell-based) ---
-                // La funzione getCentroidalTargetPoints restituisce i punti
-                // target centroidali. Questa sostituisce la logica di calcolo
-                // di P_internal nel loop.
+                // --- 2. Compute Target Centroidal Points (Cell-based) ---
                 tmp<pointField> tCentroidalTarget = getCentroidalTargetPoints(
                     mesh); // Passa il global cell count
                 const pointField& P_internal_target = tCentroidalTarget();
 
 
-                // --- 3. Calcolo dello Spostamento Proposto (Blended) ---
+                // --- 3. Compute blended displacement ---
                 boolList pointsToMove(mesh.nPoints(), false);
                 forAll(pointsToMove, pI)
                 {
@@ -2191,8 +2213,6 @@ int main(int argc, char* argv[])
                     {
                         const point& currentPos = mesh.points()[pointI];
 
-                        // P_laplacian_target e P_internal_target sono già i
-                        // punti target globalmente corretti
                         point P_ideal_blended =
                             (1.0 - blendingFactor) * P_laplacian_target[pointI]
                             + blendingFactor * P_internal_target[pointI];
@@ -2203,26 +2223,19 @@ int main(int argc, char* argv[])
                     }
                 }
 
-                // Per garantire riproducibilità e coerenza, usiamo
-                // syncPointPositions con minOp o maxOp per l'applicazione degli
-                // spostamenti finali, come fai per la fine del loop main.
-                syncTools::syncPointList( // Questa è la prima sync per gli
-                                          // spostamenti
-                    mesh,
-                    proposedDisplacement,
-                    maxOp<point>(),
-                    point::zero); // Usiamo maxOp per determinismo come in
-                                  // syncPointPositions
+                // --- 4. Sync the displacements among the processors
+                syncTools::syncPointList(mesh,
+                                         proposedDisplacement,
+                                         plusEqOp<vector>(),
+                                         vector::zero);
 
                 const_cast<pointField&>(mesh.points()) += proposedDisplacement;
 
-                // Ultima sincronizzazione per assicurare la coerenza geometrica
-                // finale dei punti condivisi.
+                // --- 5. Sync the point coordinates among the processors
                 syncTools::syncPointPositions(
                     mesh,
                     const_cast<pointField&>(mesh.points()),
-                    minOp<point>(), // O maxOp, a seconda del determinismo
-                                    // desiderato
+                    minOp<point>(),
                     point(great, great, great));
             }
             else
@@ -2233,34 +2246,27 @@ int main(int argc, char* argv[])
 
                 scalar localMinOrtho = GREAT;
                 label localWorstFaceI = -1;
-                point localWorstFaceCentroid =
-                    point::max; // Inizializzato per la Z-coord
+                point localWorstFaceCentroid = point::max;
 
-                for (label faceI = 0; faceI < mesh.nFaces();
-                     ++faceI) // Loop su TUTTE le facce
+                for (label faceI = 0; faceI < mesh.nFaces(); ++faceI)
                 {
                     if (ortho[faceI] < localMinOrtho)
                     {
                         localMinOrtho = ortho[faceI];
                         localWorstFaceI = faceI;
                         localWorstFaceCentroid =
-                            mesh.faceCentres()[faceI]; // Salva il centroide
+                            mesh.faceCentres()[faceI]; // Save the centroid
                     }
-                    // NOTA: Se ortho[faceI] == localMinOrtho (con precisione
-                    // floating point), localWorstFaceI e localWorstFaceCentroid
-                    // saranno determinati dal primo trovato. Il tie-breaker
-                    // globale risolverà qualsiasi potenziale differenza qui.
                 }
 
-                // --- FASE 1: Trova la non-ortogonalità minima globale ---
+                // --- PHASE 1: Find the global min non-orthogonality ---
                 scalar globalMinOrtho = localMinOrtho;
                 reduce(globalMinOrtho, minOp<scalar>());
 
 
-                // --- FASE 2: Trova la coordinata Z minima tra le facce con
+                // --- PHASE 2: Find the min Z coord among the faces with
                 // globalMinOrtho ---
-                scalar localMinZCoord =
-                    GREAT; // Inizializza con un valore grande
+                scalar localMinZCoord = GREAT; // Initialize with large value
                 if (localWorstFaceI != -1
                     && mag(localMinOrtho - globalMinOrtho) < SMALL)
                 {
@@ -2270,25 +2276,25 @@ int main(int argc, char* argv[])
                 reduce(globalMinZCoord, minOp<scalar>());
 
 
-                // --- FASE 3: Trova il processore master tra quelli che
-                // soddisfano entrambi i criteri ---
-                label masterProcID = -1; // Default: nessun processore è master
+                // --- PHASE 3: Find the master processor among those
+                // satisfying both the criteria ---
+                label masterProcID = -1; // Default: no processor is master
                 if (localWorstFaceI != -1
-                    && mag(localMinOrtho - globalMinOrtho) < SMALL
-                    && mag(localMinZCoord - globalMinZCoord) < SMALL)
+                    && mag(localMinOrtho - globalMinOrtho) < 1e-6
+                    && mag(localMinZCoord - globalMinZCoord) < 1e-6)
                 {
                     masterProcID =
-                        Pstream::myProcNo(); // Questo processore è un candidato
+                        Pstream::myProcNo(); // This processor is a candidate
                     Sout << "myProc " << masterProcID << " localWorstFaceI "
                          << localWorstFaceI << " localMinOrtho "
                          << localMinOrtho << " localMinZCoord "
                          << localMinZCoord << endl;
                 }
-                // Seleziona il processore con l'ID più basso tra i candidati
-                // (per determinismo) Se la tua implementazione MPI/OpenFOAM
-                // preferisce maxOp per il tie-breaker, usa quello. Usiamo minOp
-                // qui per il procID per un tie-breaker deterministico (es. proc
-                // 0, poi proc 1, ecc.)
+                // Select the processor with the lowest ID among the candidates
+                // for deterministic tie-breaking. If your MPI/OpenFOAM
+                // implementation prefers maxOp for tie-breaking, use that
+                // instead. We use minOp here for the procID for a deterministic
+                // tie-break (e.g., proc 0, then proc 1, etc.).
                 reduce(masterProcID, maxOp<label>());
 
                 if (globalMinOrtho > qualityCosThreshold)
@@ -2297,6 +2303,10 @@ int main(int argc, char* argv[])
                          << endl;
                     break;
                 }
+
+                List<point> neighbourCellCentres;
+                syncTools::swapBoundaryCellPositions(
+                    mesh, mesh.cellCentres(), neighbourCellCentres);
 
                 pointField displacement(mesh.nPoints(), vector::zero);
 
@@ -2313,15 +2323,29 @@ int main(int argc, char* argv[])
 
                     if (worstFaceI >= mesh.nInternalFaces())
                     {
+                        // The face is on the boundary of the local mesh
+                        if (isProcessorFace(mesh, worstFaceI))
+                        {
+                            Sout << "Face Type: processor boundary face"
+                                 << endl;
+                        }
+                        else
+                        {
+                            const label patchID =
+                                mesh.boundaryMesh().whichPatch(worstFaceI);
+                            Sout << "Face Type: physical boundary face on "
+                                    "patch '"
+                                 << mesh.boundaryMesh()[patchID].name() << "'"
+                                 << endl;
+                        }
                         Sout << "not internal face" << endl;
-                        List<point> neighbourCellCentres;
-                        syncTools::swapBoundaryCellPositions(
-                            mesh, mesh.cellCentres(), neighbourCellCentres);
+                        // Get the neig.centroid from other proc.
                         neiC = neighbourCellCentres[worstFaceI
                                                     - mesh.nInternalFaces()];
                     }
                     else
                     {
+                        // The face is internal for the local mesh
                         Sout << "internal face" << endl;
                         neiC = mesh.cellCentres()
                                    [mesh.faceNeighbour()[worstFaceI]];
@@ -2336,6 +2360,7 @@ int main(int argc, char* argv[])
                         vector S_hat = normalised(S);
                         vector d_hat = normalised(d);
                         scalar cosAngle = S_hat & d_hat;
+
                         if (cosAngle < 0.9999)
                         {
                             vector axis = S_hat ^ d_hat;
@@ -2361,14 +2386,22 @@ int main(int argc, char* argv[])
                                         point p_new = fC + rotated_vec;
                                         displacement[pI] = p_new - p;
                                     }
+                                    else
+                                    {
+                                        Sout << "boundary point " << endl;
+                                    }
                                 }
                             }
                         }
                     }
                 }
 
-                syncTools::syncPointList(
-                    mesh, displacement, sumOp<point>(), point::zero);
+                syncTools::syncPointList(mesh,
+                                         displacement,
+                                         plusEqOp<vector>(),
+                                         vector::zero // NULLVALUE
+                );
+
                 const_cast<pointField&>(mesh.points()) += displacement;
                 syncTools::syncPointPositions(
                     mesh,
@@ -2384,41 +2417,21 @@ int main(int argc, char* argv[])
             ortho = t_ortho_new.ref();
 
             // --- BEST MESH LOGIC: Check and save if current state is better
-            // ---
-
-            // --- NUOVO: Utilizza isMasterFace per il calcolo di
-            // currentMinOrtho ---
-            PackedBoolList isMasterFaceForBestMesh =
-                syncTools::getInternalOrMasterFaces(mesh);
-
             scalar localMinOrthoForBestMesh = GREAT;
-            // Non c'è bisogno di tenere traccia di localWorstFaceI o centroidi
-            // qui, vogliamo solo il valore minimo globale `currentMinOrtho`.
-
-            // Itera su *TUTTE* le facce, ma considera solo quelle che sono
-            // `isMasterFace`.
             for (label faceI = 0; faceI < mesh.nFaces(); ++faceI)
             {
-                if (isMasterFaceForBestMesh[faceI]) // Considera solo le facce
-                                                    // master/interne
-                {
-                    localMinOrthoForBestMesh =
-                        min(localMinOrthoForBestMesh, ortho[faceI]);
-                }
+                localMinOrthoForBestMesh =
+                    min(localMinOrthoForBestMesh, ortho[faceI]);
             }
-            // --- FINE NUOVO CALCOLO LOCALE ---
 
-            // --- AGGREGAZIONE GLOBALE (ora su valori filtrati da isMasterFace)
-            // ---
+            // --- Global aggregation
             scalar currentMinOrtho = localMinOrthoForBestMesh;
-            reduce(currentMinOrtho,
-                   minOp<scalar>()); // Questa riduzione è ora più robusta
+            reduce(currentMinOrtho, minOp<scalar>());
 
             if (currentMinOrtho > bestMinOrtho)
             {
                 bestMinOrtho = currentMinOrtho;
-                bestPoints =
-                    mesh.points(); // Salva lo stato corrente della mesh
+                bestPoints = mesh.points();
                 if (Pstream::master())
                 {
                     scalar bestAngle = Foam::radToDeg(
@@ -2426,6 +2439,10 @@ int main(int argc, char* argv[])
                     Info << "    - New best mesh quality found at iteration "
                          << iter + 1 << ": " << bestAngle << " deg." << endl;
                 }
+            }
+            else
+            {
+                Info << "currentMinOrtho " << currentMinOrtho << endl;
             }
             // --- END OF BEST MESH LOGIC ---
         }
