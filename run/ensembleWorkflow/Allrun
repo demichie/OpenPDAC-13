@@ -13,7 +13,7 @@
 # --- Configuration ---
 # Define the names of your Python scripts and template directory here.
 SAMPLING_SCRIPT="sampling_script.py"
-ENSEMBLE_SCRIPT="ensemble_generator.py"
+ENSEMBLE_SCRIPT="generate_ensemble.py"
 TEMPLATE_DIR="templatedir"
 
 # Exit immediately if a command exits with a non-zero status.
@@ -55,8 +55,8 @@ echo "--- Step 2: Generating Ensemble Directories ---"
 python3 "$ENSEMBLE_SCRIPT" > log.folderCreation
 echo "--- Ensemble generation finished successfully. ---"
 
+
 echo
 echo "========================================="
 echo "Workflow Complete."
-echo "You can now run your simulations in the 'ensemble.*' directories."
 echo "========================================="

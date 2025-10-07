@@ -84,7 +84,7 @@ def main():
            replaces placeholder strings, and reports unused parameters.
     """
     base_dir = Path.cwd()
-    samples_file = base_dir / 'samples.csv'
+    samples_file = base_dir / 'CSV/samples.csv'
     template_dir = base_dir / 'templatedir'
 
     # --- Pre-run Checks ---
@@ -103,6 +103,12 @@ def main():
     # --- Load Data ---
     df = pd.read_csv(samples_file)
     print(f"Loaded {len(df)} samples from '{samples_file}'.\n")
+
+    # --- Check for 'sample_id' column ---
+    if 'sample_id' not in df.columns:
+        print(f"Error: The required 'sample_id' column was not found in '{samples_file}'.")
+        print("Please re-run the sampling script to include this identifier column.")
+        sys.exit(1)
 
     # --- Main Loop ---
     for index, row in df.iterrows():
@@ -124,8 +130,10 @@ def main():
         # If the directory does not exist, proceed with copying.
         shutil.copytree(template_dir, working_dir, symlinks=True)
 
+        params_to_replace = row.drop('sample_id')
+
         # --- Placeholder Replacement ---
-        replace_placeholders_in_directory(working_dir, row)
+        replace_placeholders_in_directory(working_dir, params_to_replace)
         print("-" * 20)
 
     print("\nScript finished successfully.")

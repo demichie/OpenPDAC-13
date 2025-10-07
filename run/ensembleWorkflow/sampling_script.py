@@ -1,35 +1,31 @@
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from linecache import getline
+import json
 from typing import List, Tuple, Dict, Any
-from scipy.stats import qmc
-from scipy.stats import truncnorm  # For the truncated normal distribution
+from scipy.stats import truncnorm
 import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+import os
+from SALib.sample import saltelli
 
 # Global or configuration constants
+CSV_FOLDER = 'CSV'
 OUTPUT_CSV_FILE = 'samples.csv'
+OUTPUT_PLOT_FOLDER = 'ENSEMBLE_PLOTS'
 OUTPUT_PLOT_BASE_FILENAME = 'samples_plot'
+CONFIG_FILE = 'parameters.json'
+GENERATE_PLOT = True
 
+# N_SAMPLES is now the *base* number for the Saltelli sampler.
+# The total number of samples will be N * (2*D + 2), where D is the number of continuous params.
+# Powers of 2 are often recommended for N.
+N_BASE_SAMPLES = 32
+    
 
 def read_asc_file(asc_file_path: Path) -> Tuple[np.ndarray, Dict[str, Any]]:
-    """Reads an ESRI ASCII grid file (.asc) and returns its data and metadata.
-
-    Args:
-        asc_file_path (Path): The path to the .asc file to be read.
-
-    Returns:
-        Tuple[np.ndarray, Dict[str, Any]]: A tuple containing:
-            - A numpy array with the grid data, flipped vertically to have its
-              origin at the bottom-left corner.
-            - A dictionary with the header metadata (e.g., 'ncols', 'nrows',
-              'xllcorner', 'yllcorner', 'cellsize').
-
-    Raises:
-        FileNotFoundError: If the specified file does not exist.
-    """
+    """Reads an ESRI ASCII grid file (.asc) and returns its data and metadata."""
     print(f"Reading .asc file: {asc_file_path}")
     if not asc_file_path.is_file():
         raise FileNotFoundError(f"File {asc_file_path} was not found.")
@@ -48,176 +44,8 @@ def read_asc_file(asc_file_path: Path) -> Tuple[np.ndarray, Dict[str, Any]]:
     return np.flipud(data), header
 
 
-def generate_samples(parameter_config: List[Dict],
-                     n_samples: int,
-                     method: str = 'lhs') -> Dict[str, Any]:
-    """Generates a set of parameter samples using a specified sampling method.
-
-    This is the core engine that transforms a uniform Latin Hypercube sample
-    into samples for various continuous and discrete distributions using the
-    Inverse Transform Sampling technique.
-
-    Args:
-        parameter_config (List[Dict]):
-            A list where each dictionary defines a parameter to be sampled.
-            Each dictionary must contain specific keys depending on the 'type'
-            and 'distribution'.
-
-            For 'type': 'continuous':
-                - 'name' (str): The parameter's name.
-                - 'distribution' (str): One of 'linear', 'log', 'truncnorm',
-                  'powerlaw', or 'trunclognorm'.
-                - 'range' (List[float]): The [min, max] bounds for the sample.
-
-                Additional keys for specific distributions:
-                - for 'truncnorm':
-                    - 'mean' (float): The mean of the underlying normal distribution.
-                    - 'std_dev' (float): The standard deviation of the underlying
-                      normal distribution.
-                - for 'powerlaw':
-                    - 'exponent' (float): The exponent 'k' for the p(x) ~ x^k relation.
-                - for 'trunclognorm':
-                    - 'log_mean' (float): The mean of the *logarithm* of the variable.
-                    - 'log_std_dev' (float): The standard deviation of the
-                      *logarithm* of the variable.
-
-            For 'type': 'discrete':
-                - 'name' (str) or 'names' (List[str]): The output column name(s).
-                - 'values' (List): The list of possible discrete values.
-                - 'weights' (List[float], optional): Relative weights for each value.
-                - 'unpack' (bool, optional): If True and 'names' is used, unpacks
-                  paired values (like coordinates) into separate columns.
-
-        n_samples (int): The number of samples to generate for each parameter.
-        method (str): The sampling method to use. Currently supports 'lhs'.
-
-    Returns:
-        Dict[str, Any]: A dictionary where keys are the parameter names and
-        values are lists or numpy arrays of the generated samples.
-
-    Raises:
-        KeyError: If a parameter's configuration is missing a required key.
-        ValueError: If an unknown sampling method or an invalid value (e.g.,
-                    non-positive std_dev, non-positive range for log/powerlaw)
-                    is provided.
-    """
-    samples = {}
-    if method.lower() == 'lhs':
-        print("Using Latin Hypercube Sampling for all configured parameters.")
-        lhs_params = parameter_config
-        n_dims = len(lhs_params)
-        sampler = qmc.LatinHypercube(d=n_dims, seed=np.random.default_rng())
-        unit_samples = sampler.random(n=n_samples)
-
-        for i, param in enumerate(lhs_params):
-            param_type = param.get('type', 'continuous')
-            if param_type == 'continuous':
-                distribution = param.get('distribution', 'linear')
-                if distribution == 'linear':
-                    min_val, max_val = param['range']
-                    samples[param['name']] = min_val + \
-                        unit_samples[:, i] * (max_val - min_val)
-                elif distribution == 'log':
-                    min_val, max_val = param['range']
-                    if min_val == max_val:
-                        samples[param['name']] = np.full(n_samples, min_val)
-                    else:
-                        samples[param['name']] = np.exp(
-                            np.log(min_val) + unit_samples[:, i] *
-                            (np.log(max_val) - np.log(min_val)))
-                elif distribution == 'truncnorm':
-                    try:
-                        mean, std_dev, (
-                            min_val, max_val
-                        ) = param['mean'], param['std_dev'], param['range']
-                    except KeyError as e:
-                        raise KeyError(
-                            f"Parameter '{param['name']}' with 'truncnorm' is missing key: {e}"
-                        )
-                    if std_dev <= 0:
-                        raise ValueError(
-                            f"Std dev for '{param['name']}' must be positive.")
-                    a, b = (min_val - mean) / \
-                        std_dev, (max_val - mean) / std_dev
-                    dist = truncnorm(a, b, loc=mean, scale=std_dev)
-                    samples[param['name']] = dist.ppf(unit_samples[:, i])
-                elif distribution == 'trunclognorm':
-                    try:
-                        log_mean, log_std_dev, (min_val, max_val) = param[
-                            'log_mean'], param['log_std_dev'], param['range']
-                    except KeyError as e:
-                        raise KeyError(
-                            f"Parameter '{param['name']}' with 'trunclognorm' is missing key: {e}"
-                        )
-                    if log_std_dev <= 0:
-                        raise ValueError(
-                            f"Log std dev for '{param['name']}' must be positive."
-                        )
-                    if min_val <= 0:
-                        raise ValueError(
-                            f"Range for trunclognorm must be positive. Got min_val={min_val}"
-                        )
-
-                    # Work in log-space: Y = ln(X)
-                    log_min, log_max = np.log(min_val), np.log(max_val)
-
-                    # Standardize the log-space bounds for scipy's truncnorm
-                    a = (log_min - log_mean) / log_std_dev
-                    b = (log_max - log_mean) / log_std_dev
-
-                    # Create a truncated normal distribution in log-space
-                    dist_log = truncnorm(a, b, loc=log_mean, scale=log_std_dev)
-
-                    # Sample from it using the LHS samples
-                    log_samples = dist_log.ppf(unit_samples[:, i])
-
-                    # Convert samples back to the original space by taking the exponential
-                    samples[param['name']] = np.exp(log_samples)
-                elif distribution == 'powerlaw':
-                    try:
-                        exponent, (min_val,
-                                   max_val) = param['exponent'], param['range']
-                    except KeyError as e:
-                        raise KeyError(
-                            f"Parameter '{param['name']}' with 'powerlaw' is missing key: {e}"
-                        )
-                    if min_val <= 0:
-                        raise ValueError(
-                            f"The range for a power-law distribution must be positive. Got min_val={min_val}"
-                        )
-                    if exponent == -1:
-                        raise ValueError(
-                            "Exponent of -1 is a special case. Use 'log' distribution instead."
-                        )
-                    y = unit_samples[:, i]
-                    k = exponent + 1.0
-                    samples[param['name']] = (y * (max_val**k - min_val**k) +
-                                              min_val**k)**(1.0 / k)
-
-            elif param_type == 'discrete':
-                values, weights = param['values'], param.get('weights', None)
-                if weights is None:
-                    indices = np.floor(unit_samples[:, i] *
-                                       len(values)).astype(int)
-                else:
-                    cdf = np.cumsum(weights) / np.sum(weights)
-                    indices = np.searchsorted(cdf,
-                                              unit_samples[:, i],
-                                              side='right')
-                sampled_values = [values[idx] for idx in indices]
-                if param.get('unpack', False):
-                    unpacked = list(zip(*sampled_values))
-                    for j, name in enumerate(param['names']):
-                        samples[name] = unpacked[j]
-                else:
-                    samples[param['name']] = sampled_values
-    else:
-        raise ValueError(f"Unknown sampling method: {method}")
-    return samples
-
-
 def plot_pair_grid(df: pd.DataFrame, axis_vars: List, category_vars: List,
-                   log_scale_vars: set, config: Dict):
+                   log_scale_vars: set, axis_limits: Dict, config: Dict):
     """Generates the main pair plot with unified histograms and a correct, manual legend.
 
     Args:
@@ -293,6 +121,19 @@ def plot_pair_grid(df: pd.DataFrame, axis_vars: List, category_vars: List,
                             s=40,
                             palette=hue_map,
                             markers=marker_map)
+
+        if x_var in axis_limits:
+            xmin, xmax = axis_limits[x_var]
+            ax.set_xlim(xmin, xmax)
+            if i == n_vars - 1:
+                ax.set_xticks([xmin, xmax])
+        if y_var in axis_limits:
+            ymin, ymax = axis_limits[y_var]
+            if i != j:
+                ax.set_ylim(ymin, ymax)
+            if j == 0 and i != j:
+                ax.set_yticks([ymin, ymax])
+
         if i != j and x_var in log_scale_vars:
             ax.set_xscale('log')
         if i != j and y_var in log_scale_vars:
@@ -335,7 +176,12 @@ def plot_pair_grid(df: pd.DataFrame, axis_vars: List, category_vars: List,
                title=legend_title)
     fig.suptitle('Pair Plot of Sampled Parameters', fontsize=16)
 
-    base_path = Path(config['base_filename'])
+    base_folder = config['base_folder']
+    base_filename = config['base_filename']
+    os.makedirs(base_folder, exist_ok=True)
+    base_path = Path(os.path.join(base_folder, base_filename))
+
+    # base_path = Path(config['base_filename'])
     png_path = base_path.with_suffix('.png')
     pdf_path = base_path.with_suffix('.pdf')
     plt.savefig(png_path, dpi=150, bbox_inches='tight')
@@ -345,16 +191,8 @@ def plot_pair_grid(df: pd.DataFrame, axis_vars: List, category_vars: List,
     plt.close()
 
 
-def plot_category_counts(df: pd.DataFrame, category_vars: List):
-    """Generates a separate frequency bar chart for each categorical variable, saving as both PNG and PDF.
-
-    Args:
-        df (pd.DataFrame): The DataFrame containing the sample data.
-        category_vars (List[str]): A list of categorical column names to plot.
-
-    Returns:
-        None. One or more plot files are saved to disk.
-    """
+def plot_category_counts(df: pd.DataFrame, category_vars: List, config: Dict):
+    """Generates a separate frequency bar chart for each categorical variable."""
     if not category_vars:
         return
     print("\n--- Generating Category Frequency Plots ---")
@@ -371,80 +209,175 @@ def plot_category_counts(df: pd.DataFrame, category_vars: List):
         plt.tight_layout()
         safe_cat_var = "".join(c for c in cat_var
                                if c.isalnum() or c in (' ', '_')).rstrip()
+
+        base_folder = config['base_folder']
         base_filename = f"counts_of_{safe_cat_var.replace(' ', '_')}"
-        png_path = Path(f"{base_filename}.png")
-        pdf_path = Path(f"{base_filename}.pdf")
+        os.makedirs(base_folder, exist_ok=True)
+        base_path = Path(os.path.join(base_folder, base_filename))
+
+        # base_filename = f"counts_of_{safe_cat_var.replace(' ', '_')}"
+        png_path = Path(f"{base_path}.png")
+        pdf_path = Path(f"{base_path}.pdf")
         plt.savefig(png_path, dpi=150)
         plt.savefig(pdf_path)
         print(f"Category count plot saved to '{png_path}' and '{pdf_path}'")
         plt.close()
 
 
-def main():
-    """Main script to generate, save, and visualize a parameter set for simulations.
+def generate_samples_for_sobol(parameter_config: List[Dict],
+                               n_base_samples: int) -> Dict[str, Any]:
+    """Generates a sample set using the Saltelli method, required for Sobol analysis.
 
-    This script orchestrates the entire process:
-    1. Defines the parameter space in a flexible configuration dictionary.
-    2. Uses Latin Hypercube Sampling (LHS) to generate an efficient sample set.
-    3. Saves the samples to a CSV file.
-    4. Generates a comprehensive set of plots to visualize the samples,
-       including a main pair plot and frequency counts for categorical variables.
+    This function defines the 'problem' for SALib, generates the specific sample
+    matrix using saltelli.sample, and then transforms the uniform [0,1] samples
+    to their respective target distributions using the inverse transform method.
+
+    Args:
+        parameter_config (List[Dict]): The parameter space definition.
+        n_base_samples (int): The base number of samples (N). The total number
+            of simulations will be N * (2 * D + 2) for second-order indices,
+            where D is the number of continuous parameters.
+
+    Returns:
+        Dict[str, Any]: A dictionary of the generated samples.
     """
-    N_SAMPLES = 200
-    SAMPLING_METHOD = 'lhs'
-    GENERATE_PLOT = True
+    # 1. Construct the 'problem' dictionary for SALib's continuous variables
+    continuous_params = [
+        p for p in parameter_config if p['type'] == 'continuous'
+    ]
+    problem = {
+        'num_vars': len(continuous_params),
+        'names': [p['name'] for p in continuous_params],
+        # Bounds are temporarily [0,1] as we will transform the samples later
+        'bounds': [[0, 1]] * len(continuous_params)
+    }
 
-    parameter_config = [
-    {
-            'name': 'Permeability',
-            'type': 'continuous',
-            'distribution': 'trunclognorm',
-            'log_mean': -12.0,       # Mean of ln(Permeability)
-            'log_std_dev': 1.5,      # Std dev of ln(Permeability)
-            'range': [1e-7, 1e-4]  # Truncation range for Permeability itself
-    }, {
-        'name': 'Volume',
-        'type': 'continuous',
-        'distribution': 'log',
-        'range': [1000, 1e6]
-    }, {
-        'name': 'Pressure',
-        'type': 'continuous',
-        'distribution': 'truncnorm',
-        'mean': 50.0,
-        'std_dev': 15.0,
-        'range': [30.0, 90.0]
-    }, {
-        'name': 'GrainSize',
-        'type': 'continuous',
-        'distribution': 'powerlaw',
-        'exponent': -1.5,
-        'range': [0.1, 100.0]
-    }, {
-        'names': ['x', 'y'],
-        'type': 'discrete',
-        'values': [[500360, 4177600], [500650, 4177913]],
-        'weights': [2, 1],
-        'unpack': True,
-        'plot_as': 'category'
-    }, {
-        'name': 'Velocity',
-        'type': 'discrete',
-        'values': [0.0, 30.0, 60.0, 90.0],
-        'plot_as': 'category'
-    }]
+    # 2. Generate the Saltelli sample matrix in the unit hypercube [0,1]
+    # Using calc_second_order=True is standard for a comprehensive analysis.
+    # SALib will generate N * (2D + 2) samples.
+    unit_samples = saltelli.sample(problem,
+                                   n_base_samples,
+                                   calc_second_order=True)
 
-    samples = generate_samples(parameter_config, N_SAMPLES, SAMPLING_METHOD)
-    df = pd.DataFrame(samples)
-    df.to_csv(OUTPUT_CSV_FILE, index=False)
+    total_samples_required = len(unit_samples)
     print(
-        f"\nSuccessfully generated '{OUTPUT_CSV_FILE}' with {N_SAMPLES} samples."
+        f"Saltelli sampling for {problem['num_vars']} variables with N={n_base_samples} requires a total of {total_samples_required} simulation runs."
+    )
+
+    samples = {}
+    param_map = {p['name']: p for p in continuous_params}
+
+    # 3. Transform each column of the unit_samples matrix to its target distribution
+    for i, name in enumerate(problem['names']):
+        param = param_map[name]
+        distribution = param.get('distribution', 'linear')
+        y = unit_samples[:, i]  # The uniform [0, 1] samples for this parameter
+
+        if distribution == 'linear':
+            min_val, max_val = param['range']
+            samples[name] = min_val + y * (max_val - min_val)
+        elif distribution == 'log':
+            min_val, max_val = param['range']
+            if min_val == max_val:
+                samples[name] = np.full(total_samples_required, min_val)
+            else:
+                samples[name] = np.exp(
+                    np.log(min_val) + y * (np.log(max_val) - np.log(min_val)))
+        elif distribution == 'truncnorm':
+            mean, std_dev, (
+                min_val,
+                max_val) = param['mean'], param['std_dev'], param['range']
+            a, b = (min_val - mean) / std_dev, (max_val - mean) / std_dev
+            dist = truncnorm(a, b, loc=mean, scale=std_dev)
+            samples[name] = dist.ppf(y)
+        elif distribution == 'powerlaw':
+            exponent, (min_val, max_val) = param['exponent'], param['range']
+            k = exponent + 1.0
+            samples[name] = (y * (max_val**k - min_val**k) +
+                             min_val**k)**(1.0 / k)
+        elif distribution == 'trunclognorm':
+            log_mean, log_std_dev, (
+                min_val, max_val
+            ) = param['log_mean'], param['log_std_dev'], param['range']
+            log_min, log_max = np.log(min_val), np.log(max_val)
+            a, b = (log_min - log_mean) / \
+                log_std_dev, (log_max - log_mean) / log_std_dev
+            dist_log = truncnorm(a, b, loc=log_mean, scale=log_std_dev)
+            log_samples = dist_log.ppf(y)
+            samples[name] = np.exp(log_samples)
+
+    # 4. Handle discrete parameters: these are added on top of the continuous sample
+    #    by simple random sampling, as they are not part of the Sobol analysis itself.
+    discrete_params = [p for p in parameter_config if p['type'] == 'discrete']
+    for param in discrete_params:
+        values = param['values']
+        weights = param.get('weights', None)
+
+        # Create a probability distribution if weights are provided
+        probabilities = np.array(weights) / sum(weights) if weights else None
+
+        # Generate random choices for the entire sample size
+        sampled_values = np.random.choice(len(values),
+                                          size=total_samples_required,
+                                          p=probabilities)
+
+        if param.get('unpack', False):
+            for i, col_name in enumerate(param['names']):
+                samples[col_name] = [values[idx][i] for idx in sampled_values]
+        else:
+            samples[param['name']] = [values[idx] for idx in sampled_values]
+
+    return samples
+
+
+##########################################
+# MAIN FUNCTION
+##########################################
+
+
+def main():
+    """Main script to generate, save, and visualize a parameter set for simulations."""
+    # N_SAMPLES is now the *base* number for the Saltelli sampler.
+    # The total number of samples will be N * (2*D + 2), where D is the number of continuous params.
+    # Powers of 2 are often recommended for N.
+
+    try:
+        with open(CONFIG_FILE, 'r') as f:
+            parameter_config = json.load(f)
+        print(f"Parameter configuration successfully loaded from '{CONFIG_FILE}'")
+    except FileNotFoundError:
+        print(f"ERROR: Configuration file '{CONFIG_FILE}' not found.")
+        return  # Esce dallo script se il file non esiste
+    except json.JSONDecodeError:
+        print(f"ERROR: Could not decode JSON from '{CONFIG_FILE}'. Check for syntax errors.")
+        return
+
+    # Save the parameter configuration to a JSON file for the analysis script
+    os.makedirs(CSV_FOLDER, exist_ok=True)
+
+    config_path = Path(os.path.join(CSV_FOLDER, 'parameters.json'))
+    with config_path.open('w') as f:
+        json.dump(parameter_config, f, indent=4)
+    print(f"Parameter configuration saved to '{config_path}'")
+
+    # Use the new Saltelli-based sampling function
+    samples = generate_samples_for_sobol(parameter_config, N_BASE_SAMPLES)
+    df = pd.DataFrame(samples)
+    df.insert(0, 'sample_id', df.index)
+
+    output_file = os.path.join(CSV_FOLDER, OUTPUT_CSV_FILE)
+
+    df.to_csv(output_file, index=False)
+    print(
+        f"\nSuccessfully generated '{OUTPUT_CSV_FILE}' with {len(df)} samples."
     )
 
     if GENERATE_PLOT:
+        # Prepare data for plotting (this part remains the same)
         plot_df = df.copy()
         axis_vars, category_vars = [], []
         log_scale_vars = set()
+        axis_limits = {}
         for param in parameter_config:
             if param.get('plot_as') == 'category':
                 if param.get('unpack'):
@@ -461,13 +394,20 @@ def main():
                     axis_vars.extend(param['names'])
                 else:
                     axis_vars.append(param['name'])
-            if param.get('distribution') in ['log', 'powerlaw','trunclognorm']:
+                    if 'range' in param:
+                        axis_limits[param['name']] = param['range']
+            if param.get('distribution') in [
+                    'log', 'powerlaw', 'trunclognorm'
+            ]:
                 log_scale_vars.add(param['name'])
 
-        plot_config = {'base_filename': OUTPUT_PLOT_BASE_FILENAME}
+        plot_config = {
+            'base_filename': OUTPUT_PLOT_BASE_FILENAME,
+            'base_folder': OUTPUT_PLOT_FOLDER
+        }
         plot_pair_grid(plot_df, axis_vars, category_vars, log_scale_vars,
-                       plot_config)
-        plot_category_counts(plot_df, category_vars)
+                       axis_limits, plot_config)
+        plot_category_counts(plot_df, category_vars, plot_config)
 
     print("\nScript finished.")
 

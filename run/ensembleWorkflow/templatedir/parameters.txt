@@ -1,4 +1,0 @@
-# Simulation Parameters
-Volume = ENSEMBLE_Volume
-Pressure = ENSEMBLE_Pressure
-
