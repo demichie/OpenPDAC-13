@@ -47,72 +47,66 @@ using namespace Foam;
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-
 bool isProcessorFace(const Foam::polyMesh& mesh, const Foam::label faceI)
 {
-    // Primo, controlla se la faccia è interna. Se sì, non può essere una
-    // processor face.
+    // Check if face is internal
     if (faceI < mesh.nInternalFaces())
     {
         return false;
     }
 
-    // Se la faccia non è interna, appartiene a una patch.
-    // Troviamo a quale patch appartiene.
+    // If not internal, get its patch ID
     const Foam::label patchID = mesh.boundaryMesh().whichPatch(faceI);
 
-    // Controlla se l'ID della patch è valido.
+    // Check if the ID is valid
     if (patchID == -1)
     {
-        // Questo non dovrebbe accadere per una faccia di confine valida.
+        // This should not happen for a valid boundary face
         return false;
     }
 
-    // Ottieni un riferimento alla patch...
+    // Get the patch
     const Foam::polyPatch& pp = mesh.boundaryMesh()[patchID];
 
-    // ...e controlla il suo tipo usando la macro isA<T>() di OpenFOAM.
-    // Se il tipo è processorPolyPatch, allora è una faccia tra processori.
+    // Check if the patch is a processorPolyPatch
     return Foam::isA<Foam::processorPolyPatch>(pp);
 }
 
+// =========================================================================
+
 /*
- * Calcola i fattori di normalizzazione per ogni edge (1.0 / N),
- * dove N è il numero di processori che condividono l'edge.
- * Questo valore è un invariante topologico.
+ * Calculate the normalization factors for each edge (1.0 / N),
+ * where N is the number of processors sharing the edge.
+ * This value is a topological invariant.
  */
 scalarList calculateEdgeNormFactors(const fvMesh& mesh)
 {
-    // 1. Conta i processori per ogni edge usando la sincronizzazione.
+    // 1. Count the processors for each edge using synchronization.
     labelList nProcsPerEdge(mesh.nEdges(), 1);
-    // --- CORREZIONE QUI: Aggiungere il nullValue per syncEdgeList ---
-    syncTools::syncEdgeList(
-        mesh,
-        nProcsPerEdge,
-        plusEqOp<label>(),
-        0 // NULLVALUE: 0 è il valore neutro per la somma dei label
-    );
 
-    // 2. Converte il conteggio nel fattore di normalizzazione.
+    syncTools::syncEdgeList(mesh, nProcsPerEdge, plusEqOp<label>(), 0);
+
+    // 2. Convert the count into the normalization factor.
     scalarList normFactors(mesh.nEdges());
     forAll(nProcsPerEdge, edgeI)
     {
-        // Questo sarà sempre >= 1, quindi la divisione è sicura.
         normFactors[edgeI] = 1.0 / scalar(nProcsPerEdge[edgeI]);
     }
 
     return normFactors;
 }
 
+// =========================================================================
+
 /*
- * Calcola il numero fisico di vicini per ogni punto.
- * Questo è un altro invariante topologico.
- * Utilizza i fattori di normalizzazione degli edge pre-calcolati.
+ * Computes the physical number of neighbors for each point.
+ * This is another topological invariant.
+ * Uses pre-calculated edge normalization factors.
  */
 scalarList calculateNeighbourCount(const fvMesh& mesh,
                                    const scalarList& normFactors)
 {
-    // Accumula localmente le frazioni
+    // 1. Accumulate fractions locally
     scalarList tempNeighbourCount(mesh.nPoints(), 0.0);
     forAll(mesh.edges(), edgeI)
     {
@@ -121,40 +115,34 @@ scalarList calculateNeighbourCount(const fvMesh& mesh,
         tempNeighbourCount[e.end()] += normFactors[edgeI];
     }
 
-    // Sincronizza per sommare le frazioni. Il risultato sarà il conteggio
-    // corretto.
-    // --- CORREZIONE QUI: Aggiungere il nullValue per syncPointList ---
-    syncTools::syncPointList(
-        mesh,
-        tempNeighbourCount,
-        plusEqOp<scalar>(),
-        0.0 // NULLVALUE: 0.0 è il valore neutro per la somma degli scalar
-    );
+    // 2. Synchronize to add fractions. The result will be the correct
+    // count.
+    syncTools::syncPointList(mesh, tempNeighbourCount, plusEqOp<scalar>(), 0.0);
 
     return tempNeighbourCount;
 }
 
-// --- NEW HELPER: Count how many processors see each MESH POINT ---
-// Returns a labelList indexed by local mesh point ID, containing how many procs
-// share it.
+// =========================================================================
+
+/*
+ * Count how many processors see each MESH POINT ---
+ * Returns a labelList indexed by local mesh point ID, containing how many procs
+ * share it.
+ */
 labelList countProcessorsPerMeshPoint(const fvMesh& mesh)
 {
-    // 1. Inizializza una labelList per tenere i conteggi.
-    //    Ogni punto locale contribuisce con 1 al suo conteggio.
+    // 1. Initialize a labelList to keep counts.
+    // Each local point contributes 1 to its count.
     labelList nProcsPerPoint(mesh.nPoints(), 1);
 
-    // 2. Esegui la sincronizzazione per sommare questi conteggi per i punti
-    // condivisi.
-    //    La firma corretta richiede un nullValue di tipo label.
-    syncTools::syncPointList(
-        mesh,
-        nProcsPerPoint,
-        plusEqOp<label>(),
-        0 // <<--- NULLVALUE: 0 è il valore neutro per la somma dei label
-    );
+    // 2. Run sync to add these counts for the shared
+    // points.
+    syncTools::syncPointList(mesh, nProcsPerPoint, plusEqOp<label>(), 0);
 
     return nProcsPerPoint;
 }
+
+// =========================================================================
 
 scalarList calculateGlobalCellCount(const fvMesh& mesh)
 {
@@ -2409,10 +2397,13 @@ int main(int argc, char* argv[])
                 {
                     masterProcID =
                         Pstream::myProcNo(); // This processor is a candidate
-                    Sout << "myProc " << masterProcID << " localWorstFaceI "
+                    /*
+                    Sout << "  Iteration " << iter + 1
+                         << "myProc " << masterProcID << " localWorstFaceI "
                          << localWorstFaceI << " localMinOrtho "
                          << localMinOrtho << " localMinZCoord "
                          << localMinZCoord << endl;
+                    */
                 }
                 // Select the processor with the lowest ID among the candidates
                 // for deterministic tie-breaking. If your MPI/OpenFOAM
@@ -2441,8 +2432,8 @@ int main(int argc, char* argv[])
                     const point& ownC = mesh.cellCentres()[ownI];
                     point neiC;
 
-                    Sout << "Worst angle " << localMinOrtho
-                         << " Worst face center "
+                    Sout << "  Iteration " << iter + 1 << " Worst angle "
+                         << localMinOrtho << " Worst face center "
                          << mesh.faceCentres()[worstFaceI] << endl;
 
                     if (worstFaceI >= mesh.nInternalFaces())
@@ -2512,7 +2503,7 @@ int main(int argc, char* argv[])
                                     }
                                     else
                                     {
-                                        Sout << "boundary point " << endl;
+                                        // Sout << "boundary point " << endl;
                                     }
                                 }
                             }
