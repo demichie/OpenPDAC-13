@@ -579,8 +579,7 @@ void writeSTL(const word& stlFileName,
     }
 
     // Write STL file header
-    stlFile << "solid topoSurface"
-            << "\n";
+    stlFile << "solid topoSurface" << "\n";
 
     // Get dimensions of the elevation grid
     const label numRows = elevation.m();
@@ -616,42 +615,35 @@ void writeSTL(const word& stlFileName,
             vector normal1 = computeNormal(p1, p2, p3);
             stlFile << "  facet normal " << normal1.x() << " " << normal1.y()
                     << " " << normal1.z() << "\n";
-            stlFile << "    outer loop"
-                    << "\n";
+            stlFile << "    outer loop" << "\n";
             stlFile << "      vertex " << p1.x() << " " << p1.y() << " "
                     << p1.z() << "\n";
             stlFile << "      vertex " << p2.x() << " " << p2.y() << " "
                     << p2.z() << "\n";
             stlFile << "      vertex " << p3.x() << " " << p3.y() << " "
                     << p3.z() << "\n";
-            stlFile << "    endloop"
-                    << "\n";
-            stlFile << "  endfacet"
-                    << "\n";
+            stlFile << "    endloop" << "\n";
+            stlFile << "  endfacet" << "\n";
 
             // Second triangle (p2, p4, p3) - Top-right, bottom-right,
             // bottom-left
             vector normal2 = computeNormal(p2, p4, p3);
             stlFile << "  facet normal " << normal2.x() << " " << normal2.y()
                     << " " << normal2.z() << "\n";
-            stlFile << "    outer loop"
-                    << "\n";
+            stlFile << "    outer loop" << "\n";
             stlFile << "      vertex " << p2.x() << " " << p2.y() << " "
                     << p2.z() << "\n";
             stlFile << "      vertex " << p4.x() << " " << p4.y() << " "
                     << p4.z() << "\n";
             stlFile << "      vertex " << p3.x() << " " << p3.y() << " "
                     << p3.z() << "\n";
-            stlFile << "    endloop"
-                    << "\n";
-            stlFile << "  endfacet"
-                    << "\n";
+            stlFile << "    endloop" << "\n";
+            stlFile << "  endfacet" << "\n";
         }
     }
 
     // Write STL file footer
-    stlFile << "endsolid topoSurface"
-            << "\n";
+    stlFile << "endsolid topoSurface" << "\n";
 
     stlFile.close();
     Info << "STL surface written to " << stlFileName << endl;
@@ -1179,32 +1171,37 @@ int main(int argc, char* argv[])
 
         if (saveSTL)
         {
-            label factor = 2;
-            RectangularMatrix<double> elevationSubsampled =
-                subsampleMatrix(elevation, ncols, nrows, factor);
-            scalar xllSubsampled(xllcorner + (0.5 * factor) * cellsize);
-            scalar yllSubsampled(yllcorner + (0.5 * factor) * cellsize);
-            scalar cellsizeSubsampled(factor * cellsize);
-            word stlFileName(fullRasterFilePath);
-            stlFileName.replace(".asc", ".stl");
-            Info << "Saving STL file: " << stlFileName << endl;
-            if (saveBinary)
+            if (Pstream::master())
             {
-                writeBinarySTL(stlFileName,
-                               elevationSubsampled,
-                               xllSubsampled,
-                               yllSubsampled,
-                               cellsizeSubsampled);
+                label factor = 2;
+                RectangularMatrix<double> elevationSubsampled =
+                    subsampleMatrix(elevation, ncols, nrows, factor);
+                scalar xllSubsampled(xllcorner + (0.5 * factor) * cellsize);
+                scalar yllSubsampled(yllcorner + (0.5 * factor) * cellsize);
+                scalar cellsizeSubsampled(factor * cellsize);
+                word stlFileName(fullRasterFilePath);
+                stlFileName.replace(".asc", ".stl");
+                Info << "Saving STL file: " << stlFileName << endl;
+                if (saveBinary)
+                {
+                    writeBinarySTL(stlFileName,
+                                   elevationSubsampled,
+                                   xllSubsampled,
+                                   yllSubsampled,
+                                   cellsizeSubsampled);
+                }
+                else
+                {
+                    writeSTL(stlFileName,
+                             elevationSubsampled,
+                             xllSubsampled,
+                             yllSubsampled,
+                             cellsizeSubsampled);
+                }
+                Info << "Saving completed" << endl;
             }
-            else
-            {
-                writeSTL(stlFileName,
-                         elevationSubsampled,
-                         xllSubsampled,
-                         yllSubsampled,
-                         cellsizeSubsampled);
-            }
-            Info << "Saving completed" << endl;
+            label dummy = 0;
+            reduce(dummy, sumOp<label>());
         }
         file.close();
 
@@ -1256,18 +1253,23 @@ int main(int argc, char* argv[])
 
         if (saveCrop)
         {
-            Foam::fileName croppedDEMFile = pathPrefix / "DEMcropped.asc";
-            generateCroppedDEM(elevation,
-                               xllcorner + xVent,
-                               yllcorner + yVent,
-                               cellsize,
-                               xVent,
-                               yVent,
-                               xMin,
-                               xMax,
-                               yMin,
-                               yMax,
-                               croppedDEMFile);
+            if (Pstream::master())
+            {
+                Foam::fileName croppedDEMFile = pathPrefix / "DEMcropped.asc";
+                generateCroppedDEM(elevation,
+                                   xllcorner + xVent,
+                                   yllcorner + yVent,
+                                   cellsize,
+                                   xVent,
+                                   yVent,
+                                   xMin,
+                                   xMax,
+                                   yMin,
+                                   yMax,
+                                   croppedDEMFile);
+            }
+            label dummy = 0;
+            reduce(dummy, sumOp<label>());
         }
 
         Ldef = (0.5 * std::sqrt(sqr(xMax - xMin) + sqr(yMax - yMin)));
@@ -1307,7 +1309,7 @@ int main(int argc, char* argv[])
 
 
         // --- SECTION 1: PREPARATION OF Z=0 FACE CENTERS (FOR INITIAL
-        // INTERPOLATION TO POINTS) --- This block largely retains your original
+        // INTERPOLATION TO POINTS) --- This block largely retains the original
         // logic for processing z=0 faces and aggregating their data.
 
         labelList z0FaceIndices;
@@ -1380,11 +1382,10 @@ int main(int argc, char* argv[])
             {
                 FatalErrorInFunction
                     << "Coordinates (" << x << ", " << y
-                    << ") out of DEM bounds "
-                    << "x_grid: " << x_grid << ", y_grid: " << y_grid << ", "
+                    << ") out of DEM bounds " << "x_grid: " << x_grid
+                    << ", y_grid: " << y_grid << ", "
                     << "colIndex: " << colIndex << ", rowIndex: " << rowIndex
-                    << ", "
-                    << "ncols: " << ncols << ", nrows: " << nrows
+                    << ", " << "ncols: " << ncols << ", nrows: " << nrows
                     << exit(FatalError);
             }
         }
@@ -1442,7 +1443,7 @@ int main(int argc, char* argv[])
              << globalBottomCentresAreas_agg.size() << endl;
 
         // --- SECTION 2: ORTHOGONAL CORRECTION DX/DY FOR Z=0 FACES (PRESERVED)
-        // --- This block is your original logic for calculating Dx/Dy for z=0
+        // --- This block is the original logic for calculating Dx/Dy for z=0
         // faces and aggregating it. Its results (globalBottomCentresDx_agg,
         // globalBottomCentresDy_agg) will be used to interpolate dx/dy for z=0
         // mesh points in the next step.
@@ -1454,7 +1455,7 @@ int main(int argc, char* argv[])
         pointField z0Points_deformedZ(mesh.points());
         scalarField z0Points_areas(mesh.points().size());
 
-        // PASSO 2a: Deform Z for z=0 mesh points only (preliminary step)
+        // STEP 2a: Deform Z for z=0 mesh points only (preliminary step)
         // This loop calculates only the vertical deformation (Dz) for points at
         // z=0 and updates their Z-coordinate in z0Points_deformedZ.
         Info << "Performing preliminary Z-deformation for local z=0 mesh "
@@ -1494,7 +1495,7 @@ int main(int argc, char* argv[])
              << endl;
 
 
-        // PASSO 2b: Calculate Orthogonal Correction (Dx/Dy) for Z=0 Faces using
+        // STEP 2b: Calculate Orthogonal Correction (Dx/Dy) for Z=0 Faces using
         // Z-deformed points
         // We generate the dx/dy for FACES based on the *deformed*
         // z0Points. These will be aggregated and then interpolated to z=0 MESH
@@ -1589,7 +1590,7 @@ int main(int argc, char* argv[])
         // Index to fill rawSources sequentially
         label currentRawSourcesIdx = 0;
 
-        // PASSO 1: Populate rawSources with MESH POINTS at z=0 (after initial
+        // STEP 1: Populate rawSources with MESH POINTS at z=0 (after initial
         // Z-deformation)
         Info << "Populating rawSources with z=0 mesh points (final Dz, Dx, "
                 "Dy)..."
