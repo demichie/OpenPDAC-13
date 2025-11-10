@@ -23,7 +23,7 @@ License
 
 \*---------------------------------------------------------------------------*/
 
-#include "Lebowitz.H"
+#include "CarnahanStarling.H"
 #include "addToRunTimeSelectionTable.H"
 #include "phaseSystem.H"
 
@@ -35,12 +35,12 @@ namespace kineticTheoryModels
 {
 namespace radialModels
 {
-    defineTypeNameAndDebug(Lebowitz, 0);
+    defineTypeNameAndDebug(CarnahanStarling, 0);
 
     addToRunTimeSelectionTable
     (
         radialModel,
-        Lebowitz,
+        CarnahanStarling,
         dictionary
     );
 }
@@ -50,7 +50,7 @@ namespace radialModels
 
 // * * * * * * * * * * * * * * * * Constructors  * * * * * * * * * * * * * * //
 
-Foam::kineticTheoryModels::radialModels::Lebowitz::Lebowitz
+Foam::kineticTheoryModels::radialModels::CarnahanStarling::CarnahanStarling
 (
     const dictionary& coeffDict
 )
@@ -61,14 +61,14 @@ Foam::kineticTheoryModels::radialModels::Lebowitz::Lebowitz
 
 // * * * * * * * * * * * * * * * * Destructor  * * * * * * * * * * * * * * * //
 
-Foam::kineticTheoryModels::radialModels::Lebowitz::~Lebowitz()
+Foam::kineticTheoryModels::radialModels::CarnahanStarling::~CarnahanStarling()
 {}
 
 
 // * * * * * * * * * * * * * * * Member Functions  * * * * * * * * * * * * * //
 
 Foam::PtrList<Foam::volScalarField>
-Foam::kineticTheoryModels::radialModels::Lebowitz::g0
+Foam::kineticTheoryModels::radialModels::CarnahanStarling::g0
 (
     const phaseModel& phasei,
     const phaseModel& continuousPhase,
@@ -81,38 +81,44 @@ Foam::kineticTheoryModels::radialModels::Lebowitz::g0
     const phaseSystem& fluid = phasei.fluid();
 
     PtrList<volScalarField> g0_im(fluid.phases().size());
-    
-    volScalarField const_sum = alphai/phasei.d();
+
+    volScalarField alphas = alphai;
+    volScalarField eta2 = alphai / phasei.d();
 
     forAll(fluid.phases(), phaseIdx)
     {
         const phaseModel& phase = fluid.phases()[phaseIdx];
-        
         if ((&phase != &continuousPhase) and !(phaseIdx==indexi))
         {
-    	    const volScalarField& alpha = phase;
-            const_sum += alpha / phase.d();
+            alphas += phase;
+            eta2 += phase/phase.d();
         }
+    }
 
-    } 
-    
+    const volScalarField denominatorTerm = 1.0 - alphas;
+
     forAll(g0_im, iter)
     {
-        const phaseModel& phase = fluid.phases()[iter];
+        const phaseModel& phasem = fluid.phases()[iter];
 
-        if (&phase != &continuousPhase)
+        if (&phasem != &continuousPhase)
         {
+            const volScalarField di = phasei.d();
+            const volScalarField dm = phasem.d();
+            volScalarField term_d = di*dm / (di + dm);
+
             g0_im.set
             (
-            	iter,
-            	volScalarField
-            	(
-            	    "g0_im" + phasei.name() + "_" + phase.name(),
-            	    1.0/continuousPhase + 3 * phasei.d() * phase.d() 
-            	    / ( sqr(continuousPhase) * phasei.d() + phase.d() ) * const_sum
-            	)
-            ); 
-        }     
+                iter,
+                volScalarField
+                (
+                    "g0_im" + phasei.name() + "_" + phasem.name(),
+                    1.0/denominatorTerm
+                  + 3.0*term_d*eta2/sqr(denominatorTerm)
+                  + 2.0*sqr(term_d)*sqr(eta2)/pow3(denominatorTerm)
+                )
+            );
+        }
     }
 
     return g0_im;
@@ -120,7 +126,7 @@ Foam::kineticTheoryModels::radialModels::Lebowitz::g0
 
 
 Foam::PtrList<Foam::volScalarField>
-Foam::kineticTheoryModels::radialModels::Lebowitz::g0prime
+Foam::kineticTheoryModels::radialModels::CarnahanStarling::g0prime
 (
     const phaseModel& phasei,
     const phaseModel& continuousPhase,
@@ -133,42 +139,60 @@ Foam::kineticTheoryModels::radialModels::Lebowitz::g0prime
     const phaseSystem& fluid = phasei.fluid();
 
     PtrList<volScalarField> g0prime_im(fluid.phases().size());
-    
-    volScalarField const_sum = alphai/phasei.d();
+
+    volScalarField alphas = alphai;
+    volScalarField eta2 = alphai / phasei.d();
 
     forAll(fluid.phases(), phaseIdx)
     {
         const phaseModel& phase = fluid.phases()[phaseIdx];
-        
+
         if ((&phase != &continuousPhase) and !(phaseIdx==indexi))
         {
-    	    const volScalarField& alpha = phase;
-            const_sum += alpha / phase.d();
+            alphas += phase;
+            eta2 += phase / phase.d();
         }
+    }
 
-    } 
-    
+    volScalarField mask = Foam::sign(Foam::pos(alphas - SMALL));
+    volScalarField dEta2dAlphas = mask * (eta2 / (alphas + ROOTVSMALL));
+    const volScalarField denominatorTerm = 1.0 - alphas;
+
     forAll(g0prime_im, iter)
     {
-        const phaseModel& phase = fluid.phases()[iter];
+        const phaseModel& phasem = fluid.phases()[iter];
 
-        if (&phase != &continuousPhase)
+        if (&phasem != &continuousPhase)
         {
+            const volScalarField di = phasei.d();
+            const volScalarField dm = phasem.d();
+            // *** FINAL FIX: Materialize tmp<> into a persistent volScalarField ***
+            volScalarField term_d = di*dm / (di + dm);
+
+            tmp<volScalarField> dT1 = 1.0/sqr(denominatorTerm);
+            tmp<volScalarField> dT2 = 3.0*term_d*
+            (
+                dEta2dAlphas/sqr(denominatorTerm)
+              + 2.0*eta2/pow3(denominatorTerm)
+            );
+            tmp<volScalarField> dT3 = 2.0*sqr(term_d)*
+            (
+                2.0*eta2*dEta2dAlphas/pow3(denominatorTerm)
+              + 3.0*sqr(eta2)/pow(denominatorTerm, 4.0)
+            );
+
             g0prime_im.set
             (
-            	iter,
-            	volScalarField
-            	(
-            	    "g0_im" + phasei.name() + "_" + phase.name(),
-            	    1.0/sqr(continuousPhase) + 6 * phasei.d() * phase.d() 
-            	    / ( pow(continuousPhase,3) * phasei.d() + phase.d() ) * const_sum
-            	    + 3 * phasei.d() * phase.d() / phasei.d()
-            	    / ( sqr(continuousPhase) * phasei.d() + phase.d() ) 
-            	)
-            ); 
-        }     
+                iter,
+                volScalarField
+                (
+                    "g0prime_im" + phasei.name() + "_" + phasem.name(),
+                    dT1 + dT2 + dT3
+                )
+            );
+        }
     }
-    
+
     return g0prime_im;
 }
 

@@ -382,21 +382,15 @@ Foam::RASModels::kineticTheoryModel::pPrime() const
                 continuousPhase,                
                 radialModel_->g0
                 (
-                    (  multiParticles_
-                     ? phase_
-                     : alpha_
-                    ),
+		    phase_,
                     continuousPhase,
                     alphaMinFriction_,
                     alphasMax_
                 ),
                 radialModel_->g0prime
                 (
-                    (  multiParticles_
-                     ? phase_
-                     : alpha_
-                    ),
-                    continuousPhase,
+		    phase_,
+		    continuousPhase,
                     alphaMinFriction_,
                     alphasMax_
                 ),
@@ -509,8 +503,7 @@ void Foam::RASModels::kineticTheoryModel::correct()
     volScalarField alphasMax_ = 0.0*phase_;
 
     // Calculating the radial distribution function
-    if ( multiParticles_)
-    {
+
         alphasMax_ = phase_.fluid().alfasMax();
         PtrList<volScalarField> g0list_ = radialModel_->g0(phase_, continuousPhase, alphaMinFriction_, alphasMax_);
         gs0_ = g0list_[indexi];
@@ -525,15 +518,6 @@ void Foam::RASModels::kineticTheoryModel::correct()
             }
         } 
         
-    }
-    else 
-    {
-        alphasMax_ += phase_.alphaMax();
-        gs0_ = radialModel_->g0(alpha, continuousPhase, alphaMinFriction_, alphasMax_);
-        sumAlphaGs0_ = max(residualAlpha_,alpha)*gs0_;
-        
-    }
-
     const volScalarField alphas = 1.0 - continuousPhase;
 
     // Drag
@@ -829,5 +813,5 @@ void Foam::RASModels::kineticTheoryModel::correct()
     }
 }
 
+//**********************************************************************//
 
-// ************************************************************************* //

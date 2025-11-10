@@ -67,44 +67,6 @@ Foam::kineticTheoryModels::radialModels::SinclairJackson::~SinclairJackson()
 
 // * * * * * * * * * * * * * * * Member Functions  * * * * * * * * * * * * * //
 
-Foam::tmp<Foam::volScalarField>
-Foam::kineticTheoryModels::radialModels::SinclairJackson::g0
-(
-    const volScalarField& alpha,
-    const phaseModel& continuousPhase,
-    const dimensionedScalar& alphaMinFriction,
-    const volScalarField& alphasMax
-) const
-{
-    return 1.0/(1 - cbrt(min(alpha, alphaMinFriction)/alphasMax));
-}
-
-
-Foam::tmp<Foam::volScalarField>
-Foam::kineticTheoryModels::radialModels::SinclairJackson::g0prime
-(
-    const volScalarField& alpha,
-    const phaseModel& continuousPhase,
-    const dimensionedScalar& alphaMinFriction,
-    const volScalarField& alphasMax
-) const
-{
-    volScalarField aByaMax
-    (
-        cbrt(min(max(alpha, scalar(1e-3)), alphaMinFriction)/alphasMax)
-    );
-
-    // TODO: CHECK IF THIS MAKE THE CONVERGENCE WORST OR BETTER
-    volScalarField posCoeff
-    (
-        pos(alphaMinFriction-alpha) * pos(alpha-scalar(1e-3))
-    );
-    return posCoeff*(1.0/(3*alphasMax))/sqr(aByaMax - sqr(aByaMax));    
-    // return (1.0/(3*alphasMax))/sqr(aByaMax - sqr(aByaMax));
-}
-
-
-//Foam::tmp<Foam::volScalarField>
 Foam::PtrList<Foam::volScalarField>
 Foam::kineticTheoryModels::radialModels::SinclairJackson::g0
 (

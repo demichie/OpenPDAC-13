@@ -190,7 +190,13 @@ public:
         //- Disallow default bitwise copy construction
         kineticTheoryModel(const kineticTheoryModel&) = delete;
 
+    //- Return the radial distribution function at contact
+    const volScalarField& gs0() const
+    {
+        return gs0_;
+    }
 
+  
     //- Destructor
     virtual ~kineticTheoryModel();
 
