@@ -2,7 +2,7 @@
   =========                 |
   \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
    \\    /   O peration     | Website:  https://openfoam.org
-    \\  /    A nd           | Copyright (C) 2011-2024 OpenFOAM Foundation
+    \\  /    A nd           | Copyright (C) 2011-2023 OpenFOAM Foundation
      \\/     M anipulation  |
 -------------------------------------------------------------------------------
 License
@@ -22,21 +22,19 @@ License
     along with OpenFOAM.  If not, see <http://www.gnu.org/licenses/>.
 
 Class
-    Foam::kineticTheoryModels::radialModel
+    Foam::kineticTheoryModels::radialModels::Lebowitz
+
+Description
 
 SourceFiles
-    radialModel.C
+    LebowitzRadial.C
 
 \*---------------------------------------------------------------------------*/
 
-#ifndef radialModel_H
-#define radialModel_H
+#ifndef CarnahanStarling_H
+#define CarnahanStarling_H
 
-#include "dictionary.H"
-#include "volFields.H"
-#include "dimensionedTypes.H"
-#include "runTimeSelectionTables.H"
-#include "phaseSystem.H"
+#include "radialModel.H"
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
@@ -44,88 +42,57 @@ namespace Foam
 {
 namespace kineticTheoryModels
 {
+namespace radialModels
+{
 
 /*---------------------------------------------------------------------------*\
-                         Class radialModel Declaration
+                       Class Lebowitz Declaration
 \*---------------------------------------------------------------------------*/
 
-class radialModel
+class CarnahanStarling
+:
+    public radialModel
 {
-    // Private member functions
-
-        //- Read the coefficients from coeffDict
-        virtual bool readCoeffs(const dictionary& coeffDict)
-        {
-            return true;
-        }
-
 
 public:
 
     //- Runtime type information
-    TypeName("radialModel");
-
-    // Declare runtime constructor selection table
-    declareRunTimeSelectionTable
-    (
-        autoPtr,
-        radialModel,
-        dictionary,
-        (
-            const dictionary& dict
-        ),
-        (dict)
-    );
+    TypeName("CarnahanStarling");
 
 
     // Constructors
-
+  
         //- Construct from the coefficients dictionary
-        radialModel(const dictionary& coeffDict);
-
-        //- Disallow default bitwise copy construction
-        radialModel(const radialModel&) = delete;
-
-
-    // Selectors
-
-        static autoPtr<radialModel> New
-        (
-            const dictionary& dict
-        );
+        CarnahanStarling(const dictionary& coeffDict);
 
 
     //- Destructor
-    virtual ~radialModel();
+    virtual ~CarnahanStarling();
 
 
     // Member Functions
-        bool read(const dictionary& dict);
-        
-        virtual PtrList<volScalarField> g0
+
+        PtrList<volScalarField> g0
+                (
+            const phaseModel& phase,
+            const phaseModel& continuousPhase,
+            const dimensionedScalar& alphaMinFriction,
+            const volScalarField& alphasMax
+        ) const;
+
+        PtrList<volScalarField> g0prime
         (
             const phaseModel& phase,
             const phaseModel& continuousPhase,
             const dimensionedScalar& alphaMinFriction,
             const volScalarField& alphasMax
-        ) const = 0;
-
-        virtual PtrList<volScalarField> g0prime
-        (
-            const phaseModel& phase,
-            const phaseModel& continuousPhase,
-            const dimensionedScalar& alphaMinFriction,
-            const volScalarField& alphasMax
-        ) const = 0;
-
-
-    // Member Operators
-        void operator=(const radialModel&) = delete;
+        ) const;
 };
 
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
+} // End namespace radialModels
 } // End namespace kineticTheoryModels
 } // End namespace Foam
 

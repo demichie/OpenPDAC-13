@@ -69,9 +69,13 @@ class solidSolidDrag
         //- Name of the solid phase
         const word solid2Name_;
 
+        //- RadialModel Flag                                                            
+        //const dimensionedScalar PPdrag_;                                              
+        const word PPdrag_;
+
         //- Coefficient of restitution
         const dimensionedScalar E_;
-
+ 
         //- Coefficient of friction
         const dimensionedScalar Cf_;
 

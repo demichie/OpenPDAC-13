@@ -61,34 +61,13 @@ public:
 
 
     // Constructors
-
-        //- Construct from the coefficients dictionary
         SinclairJackson(const dictionary& coeffDict);
-
 
     //- Destructor
     virtual ~SinclairJackson();
 
 
     // Member Functions
-
-
-        tmp<volScalarField> g0
-        (
-            const volScalarField& alpha,
-            const phaseModel& continuousPhase,
-            const dimensionedScalar& alphaMinFriction,
-            const volScalarField& alphasMax
-        ) const;
-
-        tmp<volScalarField> g0prime
-        (
-            const volScalarField& alpha,
-            const phaseModel& continuousPhase,
-            const dimensionedScalar& alphaMinFriction,
-            const volScalarField& alphasMax
-        ) const;
-
         PtrList<volScalarField> g0
                 (
             const phaseModel& phase,
