@@ -1069,10 +1069,13 @@ int main(int argc, char* argv[])
         const scalar distC2 = topoDict.lookupOrDefault<scalar>("distC2", 0.0);
         const scalar noDeformCoeff =
             topoDict.lookupOrDefault<scalar>("noDeformCoeff", 0.5);
+        const scalar noDeformExp =
+            topoDict.lookupOrDefault<scalar>("noDeformExp", 1.0);
         const Switch saveCrop =
             topoDict.lookupOrDefault<Switch>("saveCrop", false);
         const scalar coeffVertDeformation =
             topoDict.lookupOrDefault<scalar>("coeffVertDeformation", 1.0);
+        
         scalarList zNeg, dxNeg, dyNeg;
         bool useNegDeformation = true;
         // --- End original declarations ---
@@ -1923,6 +1926,8 @@ int main(int argc, char* argv[])
                     {
                         coeffHor = 1.0;
                     }
+
+                    coeffHor = Foam::pow(coeffHor,noDeformExp);
 
                     interpDx = DeltaInterp.x() * coeffHor;
                     interpDy = DeltaInterp.y() * coeffHor;
