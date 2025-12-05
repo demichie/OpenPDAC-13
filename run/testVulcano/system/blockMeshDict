@@ -161,6 +161,99 @@ codeInclude
         grading = (nCells <= 1) ? 1.0 : r;
     };
 
+// --------------------------------------------------------------------
+        // Structure to return solver results
+        // --------------------------------------------------------------------
+        struct RingParams {
+            scalar R_icyl;   // Calculated outer radius for the ring
+            scalar grading;  // simpleGrading value (last_cell / first_cell)
+        };
+
+        // --------------------------------------------------------------------
+        // SOLVER: Calculates R_icyl and Grading to match cell sizes at the interface
+        // --------------------------------------------------------------------
+        auto solveRingParameters = [&](scalar R_inner, scalar d_start, label N_ring, scalar L_far_field, label N_outer) -> RingParams 
+        {
+            // Limits for the geometric expansion ratio 'r'
+            // r < 1: compression, r > 1: expansion
+            scalar r_min = 0.5;
+            scalar r_max = 2.0;
+            
+            // Bisection variables
+            scalar r_low = r_min;
+            scalar r_high = r_max;
+            scalar r_sol = 1.0;
+            
+            // Tolerance based on the starting cell size
+            scalar tolerance = 1e-5 * d_start;
+            int max_iter = 100;
+
+            for (int iter = 0; iter < max_iter; ++iter) {
+                scalar r = 0.5 * (r_low + r_high);
+                
+                // 1. Calculate ring width (Geometric series sum)
+                scalar ring_width;
+                scalar d_end_ring;
+
+                // Handle case r ~ 1.0 to avoid division by zero
+                if (Foam::mag(r - 1.0) < 1e-6) {
+                    ring_width = d_start * N_ring;
+                    d_end_ring = d_start;
+                } else {
+                    ring_width = d_start * (pow(r, N_ring) - 1.0) / (r - 1.0);
+                    d_end_ring = d_start * pow(r, N_ring - 1);
+                }
+
+                scalar R_curr = R_inner + ring_width;
+                
+                // 2. Calculate average cell size in the outer block
+                scalar space_remaining = L_far_field - R_curr;
+
+                // Safety check: if the ring becomes too large and touches the boundary,
+                // drastically reduce the upper limit of r
+                if (space_remaining < 1e-3 * L_far_field) {
+                    r_high = r;
+                    continue;
+                }
+
+                scalar d_start_outer = space_remaining / N_outer;
+
+                // 3. Check Error (Discontinuity at the interface)
+                scalar error = d_end_ring - d_start_outer;
+
+                // Convergence reached?
+                if (Foam::mag(error) < tolerance) {
+                    r_sol = r;
+                    break;
+                }
+
+                // 4. Update Bisection
+                // If d_end > d_outer (Error > 0), the grading is too aggressive.
+                // Since Error increases monotonically with r, we must reduce r.
+                if (error > 0) {
+                    r_high = r;
+                } else {
+                    r_low = r;
+                }
+                r_sol = r;
+            }
+
+            // Calculate final results using the found solution
+            scalar final_width;
+            if (Foam::mag(r_sol - 1.0) < 1e-6) {
+                final_width = d_start * N_ring;
+            } else {
+                final_width = d_start * (pow(r_sol, N_ring) - 1.0) / (r_sol - 1.0);
+            }
+
+            // In OpenFOAM, simpleGrading is defined as (LastCell / FirstCell)
+            // This is equivalent to r^(N-1)
+            scalar final_grading = pow(r_sol, N_ring - 1);
+
+            return RingParams{R_inner + final_width, final_grading};
+        };
+
+
     int n_mult = pow(2, $n_vert_layers - 1);
 
     scalar hor_cell_size_top_atm($hor_cell_size_topo * n_mult);
@@ -442,6 +535,7 @@ codeInclude
 
     // --- Storage for Start Indices ---
     // Base Levels
+    label L_condBase_center = -1;
     label L_condBase_oct_Start = -1, L_condBase_outer_Start = -1;
 
     label L_crBase_center = -1, L_crBase_oct_Start = -1,
@@ -473,9 +567,10 @@ codeInclude
         scalar z = conduit_base_z;
         scalar dx = $dx_crater_base + $dx_conduit_base;
         scalar dy = $dy_crater_base + $dy_conduit_base;
+        L_condBase_center = addVertex(vector(dx, dy, z), "CrBase Ctr");
         makeRing(L_condBase_oct_Start,
-                 $coeff * 0.5 * r_cond_base,
                  0.5 * r_cond_base,
+                 $coeff * cos(radAngle) * 0.5 * r_cond_base,
                  z,
                  dx,
                  dy,
@@ -523,6 +618,11 @@ codeInclude
     scalar icylExt_x;
     scalar icylExt_y;
 
+    // List to store the calculated optimal grading for each layer.
+    // Size is +1 because loop runs from 1 to n_vert_layers.
+    List<scalar> storedGradings($n_vert_layers + 1, rad_gr_val);
+    List<scalar> storedRadiusCyl($n_vert_layers + 1, $r_crater_top + ring_width_const);
+
     // --- Loop through atmospheric horizontal layers ---
     for (label layer = 1; layer <= $n_vert_layers; ++layer)
     {
@@ -544,15 +644,15 @@ codeInclude
         {
             // Bottom Z is the Top Z of the previous layer
             z_level = $atm_top_z * layer_fraction[layer - 1];
-            r_icyl = $r_crater_top * pow(2.0, layer - 1)
-                + ring_width_const * 1.5 * pow(2.0, layer - 2);
+            //r_icyl = $r_crater_top * pow(2.0, layer - 1)
+            //    + ring_width_const * 1.5 * pow(2.0, layer - 2);
             icylExt_x = $hor_cell_size_topo * pow(2.0, layer - 2) * n_crater;
             icylExt_y = icylExt_x;
         }
 
         Info << "bottom level " << z_level << endl;
 
-        r_cr_top = $r_crater_top * pow(2.0, layer - 1);
+        r_cr_top = $r_crater_top * pow($exp_fact, layer - 1);
 
         scalar dx = 0.0; // Assuming centered
         scalar dy = 0.0;
@@ -574,6 +674,8 @@ codeInclude
                  dy,
                  "L" + Foam::name(layer) + " Btm",
                  "Oct");
+                 
+                 
         makeRing(L_bottom_inr_Start[listIdxBottom],
                  r_cr_top,
                  r_cr_top * cos(radAngle),
@@ -582,7 +684,7 @@ codeInclude
                  dy,
                  "L" + Foam::name(layer) + " Btm",
                  "Inr");
-
+                 
         L_bottom_inrDup_Start[listIdxBottom] =
             vertexCount; // Duplicates for mergePatchPairs interface at base of
                          // L2
@@ -598,7 +700,7 @@ codeInclude
                  dy,
                  "L" + Foam::name(layer) + " Btm",
                  "ICyl");
-
+        
         // --- Far Field Vertices (Systematic N=0, CCW Indexing) ---
         L_bottom_far_Start[listIdxBottom] = vertexCount; // Or listIdx for z=0
         string prefix =
@@ -639,10 +741,7 @@ codeInclude
 
         z_level = $atm_top_z * layer_fraction[layer];
 
-        r_cr_top = $r_crater_top * pow(2.0, layer);
-
-        r_icyl = $r_crater_top * pow(2.0, layer)
-            + ring_width_const * 1.5 * pow(2.0, layer - 1);
+        r_cr_top = $r_crater_top * pow($exp_fact, layer);
 
         Info << "top level " << z_level << endl;
 
@@ -664,6 +763,8 @@ codeInclude
                  dy,
                  "L" + Foam::name(layer) + " Top",
                  "Oct");
+                 
+                 
         makeRing(L_inr_Start[listIdxTop],
                  r_cr_top,
                  r_cr_top * cos(radAngle),
@@ -672,13 +773,70 @@ codeInclude
                  dy,
                  "L" + Foam::name(layer) + " Top",
                  "Inr");
-
+                                                  
         L_inrDup_Start[listIdxTop] =
             vertexCount; // Duplicates for mergePatchPairs interface at base of
                          // L2
         for (label k = 0; k < 8; ++k)
             addVertex(points[L_inr_Start[listIdxTop] + k],
                       "L" + Foam::name(layer) + " TopInrDup");
+
+
+        // 1. Calculate scaling parameters for this layer
+        // ------------------------------------------------------------------
+        // Note: r_cr_top is already defined in your code (crater radius at this layer)
+
+        scalar scale_factor = pow(2.0, layer); 
+        scalar d_start_curr = actual_crater_top_size * scale_factor; // Target cell size at the crater rim
+
+        // ------------------------------------------------------------------
+        // 2. Calculate outer cell counts (N_outer) scaled for this layer
+        //    (nx_pos_out_mult etc. are the cell counts at the base layer)
+        //    The count halves as the layer index increases (cells get larger)
+        // ------------------------------------------------------------------
+        int div_factor = pow(2, layer-1); 
+        
+        label N_xp = Foam::max(1, (int)round(nx_pos_out_mult / (double)div_factor));
+        label N_xn = Foam::max(1, (int)round(nx_neg_out_mult / (double)div_factor));
+        label N_yp = Foam::max(1, (int)round(ny_pos_out_mult / (double)div_factor));
+        label N_yn = Foam::max(1, (int)round(ny_neg_out_mult / (double)div_factor));
+
+        Info << "N_xp " << N_xp  << " N_yp " << N_yp  << "N_xn " << N_xn  << "N_yn " << N_yn << endl;
+
+        // ------------------------------------------------------------------
+        // 3. Solve ring parameters for the 4 cardinal directions (Asymmetry)
+        //    (Uses r_cr_top as the inner radius)
+        // ------------------------------------------------------------------
+        RingParams p_xp = solveRingParameters(r_cr_top, d_start_curr, n_rad_gr_interface, mag($atm_x_pos), N_xp);
+        RingParams p_xn = solveRingParameters(r_cr_top, d_start_curr, n_rad_gr_interface, mag($atm_x_neg), N_xn);
+        RingParams p_yp = solveRingParameters(r_cr_top, d_start_curr, n_rad_gr_interface, mag($atm_y_pos), N_yp);
+        RingParams p_yn = solveRingParameters(r_cr_top, d_start_curr, n_rad_gr_interface, mag($atm_y_neg), N_yn);
+
+        // ------------------------------------------------------------------
+        // 4. Select the Minimum Radius (Conservative Strategy)
+        //    This defines your new r_icyl to ensure the ring fits within
+        //    the domain boundaries in all directions.
+        // ------------------------------------------------------------------
+        r_icyl = Foam::min(Foam::min(p_xp.R_icyl, p_xn.R_icyl), Foam::min(p_yp.R_icyl, p_yn.R_icyl));
+
+        // ------------------------------------------------------------------
+        // 5. Find and Store the Grading corresponding to the chosen radius
+        // ------------------------------------------------------------------
+        scalar calculated_grading = 1.0;
+        
+        if      (Foam::mag(r_icyl - p_xp.R_icyl) < 1e-4) calculated_grading = p_xp.grading;
+        else if (Foam::mag(r_icyl - p_xn.R_icyl) < 1e-4) calculated_grading = p_xn.grading;
+        else if (Foam::mag(r_icyl - p_yp.R_icyl) < 1e-4) calculated_grading = p_yp.grading;
+        else                                             calculated_grading = p_yn.grading;
+
+        // IMPORTANT: Store this grading in the list to use it later in the 'blocks' section
+        storedGradings[layer] = calculated_grading;
+        storedRadiusCyl[layer] = r_icyl;
+
+        Info << "Layer " << layer << " Optimization: r_cr_top=" << r_cr_top 
+             << " -> r_icyl=" << r_icyl << " (Grading=" << calculated_grading << ")" << endl;
+
+
 
         makeRing(L_icyl_Start[listIdxTop],
                  r_icyl,
@@ -743,6 +901,66 @@ codeInclude
     auto vIdx = [&](label groupStart, int offset) {
         return groupStart + offset;
     };
+
+
+// --- Conduit Blocks (Connect Base:Conduit -> Top:CraterBase) ---
+    if ($h_conduit > 0)
+    {
+        os << "    // --- Conduit Blocks ---" << endl;
+        label nz = nz_conduit; // Già calcolato sopra
+        scalar grading = 1.0; // O un valore calcolato se necessario
+
+        int nr_c = n_crater;
+        int na_c = n_crater;
+
+        // Conduit Center Blocks (4 blocks)
+        for (int q = 0; q < 4; ++q)
+        {
+            int oct_idx0 = (q * 2 + 0) % 8;
+            int oct_idx1 = (q * 2 + 1) % 8;
+            int oct_idx2 = (q * 2 + 2) % 8;
+
+            os << "    hex ("
+               // Base Face (z=conduit_base_z) - CCW Winding
+               << L_condBase_center  << " "
+               << vIdx(L_condBase_oct_Start, oct_idx0) << " "
+               << vIdx(L_condBase_oct_Start, oct_idx1) << " "
+               << vIdx(L_condBase_oct_Start, oct_idx2)
+               << " "
+               // Top Face (z=crater_base_z) - Corresponding vertices
+               << L_crBase_center << " "
+               << vIdx(L_crBase_oct_Start, oct_idx0) << " "
+               << vIdx(L_crBase_oct_Start, oct_idx1) << " "
+               << vIdx(L_crBase_oct_Start, oct_idx2)
+               << ") "
+               << "( " << na_c << " " << na_c << " " << nz
+               << ") simpleGrading (1 1 " << grading
+               << ") // Conduit Ctr Quadrant " << q << endl;
+        }
+
+        // Conduit Outer Blocks (8 blocks)
+        for (int i = 0; i < 8; ++i)
+        {
+            int i_plus_1 = (i + 1) % 8;
+
+            os << "    hex ("
+               // Base Face (z=conduit_base_z) - CCW Winding
+               << vIdx(L_condBase_oct_Start, i) << " "
+               << vIdx(L_condBase_outer_Start, i) << " "
+               << vIdx(L_condBase_outer_Start, i_plus_1) << " "
+               << vIdx(L_condBase_oct_Start, i_plus_1)
+               << " "
+               // Top Face (z=crater_base_z) - Corresponding vertices
+               << vIdx(L_crBase_oct_Start, i) << " "
+               << vIdx(L_crBase_outer_Start, i) << " "
+               << vIdx(L_crBase_outer_Start, i_plus_1) << " "
+               << vIdx(L_crBase_oct_Start, i_plus_1)
+               << ") "
+               << "( " << na_c << " " << nr_c << " " << nz
+               << ") simpleGrading (1 1 " << grading
+               << ") // Conduit Outer Segment " << i << endl;
+        }
+    }
 
     // --- Crater Blocks (Connect Base:Crater -> Top:z=0) ---
     os << "    // --- Crater Blocks ---" << endl;
@@ -856,14 +1074,14 @@ codeInclude
             scalar layer_z = z_top - z_bottom;
 
             dz_atm_min = hor_cell_size_top_atm / pow(2, $n_vert_layers - layer)
-                * atmCells_aspect_ratio_bottom[layer - 2];
+                * atmCells_aspect_ratio_bottom[layer - 1];
             dz_atm_max = hor_cell_size_top_atm / pow(2, $n_vert_layers - layer)
-                * atmCells_aspect_ratio_top[layer - 2];
+                * atmCells_aspect_ratio_top[layer - 1];
 
             calculateGradingCells(
                 layer_z, dz_atm_min, dz_atm_max, nz_layer, grading_layer);
-            Info << atmCells_aspect_ratio_bottom[layer - 2]
-                 << atmCells_aspect_ratio_top[layer - 2] << endl;
+            Info << atmCells_aspect_ratio_bottom[layer - 1]
+                 << atmCells_aspect_ratio_top[layer - 1] << endl;
             Info << " dz_atm_min = " << dz_atm_min
                  << ", dz_atm_max = " << dz_atm_max << endl;
             Info << "Calculated nz_layer = " << nz_layer
@@ -961,6 +1179,13 @@ codeInclude
             // (for radial grading zone). Counts for L>1 scale the BASE fine
             // counts (n_radial_grading, n_angle) by 'j'.
 
+            scalar g_bot = storedGradings[layer-1];
+            scalar g_top = storedGradings[layer];
+    
+            // Grading Verticale e Angolare
+            scalar g_vert = grading_layer; // O calculated grading verticale
+            scalar g_ang = 1.0;       // Angolare uniforme
+
             os << "    // L" << layer
                << " Radial Interface Blocks (Inr[Dup?]->Icyl)" << endl;
             for (int i = 0; i < 8; ++i) // Loop through the 8 segments
@@ -985,9 +1210,17 @@ codeInclude
                    // Cell counts (nx ny nz) -> nx along v0->v1 (radial), ny
                    // along v1->v2 (angular)
                    << "( " << n_rad_gr_interface << " " << n_crater << " "
-                   << nz_layer << ") simpleGrading (" << rad_gr_val << " 1 "
+                   << nz_layer << ") "
+                   /*
+                   << "simpleGrading (" << rad_gr_val << " 1 "
                    << grading_layer << ") // L" << layer
                    << " Interface Segment " << i << endl;
+                   */
+                   << "edgeGrading ("
+                   << g_bot << " " << g_bot << " " << g_top << " " << g_top << " "  // Dir Radiale (X)
+                   << g_ang << " " << g_ang << " " << g_ang << " " << g_ang << " "  // Dir Angolare (Y)
+                   << g_vert << " " << g_vert << " " << g_vert << " " << g_vert     // Dir Verticale (Z)
+                   << ") " << endl;                   
             }
 
             // --- Atmospheric Outer Blocks (Icyl -> Far) - Single Loop Strategy
@@ -1209,6 +1442,83 @@ codeInclude
                  "z0 InrDup");
     }
 
+    makeArcs(L_bottom_icyl_Start[1],
+             storedRadiusCyl[0],
+             $crater_top_z,
+             0.0,
+             0.0,
+             "z0 ExtCyl");
+
+    label layer = 1;
+
+    makeArcs(L_inr_Start[layer],
+             $r_crater_top * pow($exp_fact, layer),
+             $atm_top_z * layer_fraction[layer],
+             0.0,
+             0.0,
+             "z0 ExtCyl");
+
+    makeArcs(L_inrDup_Start[layer],
+             $r_crater_top * pow($exp_fact, layer),
+             $atm_top_z * layer_fraction[layer],
+             0.0,
+             0.0,
+             "z0 ExtCyl");
+
+    makeArcs(L_icyl_Start[layer],
+             storedRadiusCyl[layer],
+             $atm_top_z * layer_fraction[layer],
+             0.0,
+             0.0,
+             "z0 ExtCyl");             
+
+    for (label layer = 2; layer <= $n_vert_layers; ++layer)
+    {
+
+        makeArcs(L_bottom_inr_Start[layer],
+                 $r_crater_top * pow($exp_fact, layer-1),
+                 $atm_top_z * layer_fraction[layer-1],
+                 0.0,
+                 0.0,
+                 "z0 ExtCyl");
+
+        makeArcs(L_bottom_inrDup_Start[layer],
+                 $r_crater_top * pow($exp_fact, layer-1),
+                 $atm_top_z * layer_fraction[layer-1],
+                 0.0,
+                 0.0,
+                 "z0 ExtCyl");
+
+        makeArcs(L_bottom_icyl_Start[layer],
+                 storedRadiusCyl[layer-1],
+                 $atm_top_z * layer_fraction[layer-1],
+                 0.0,
+                 0.0,
+                 "z0 ExtCyl");
+
+        makeArcs(L_inr_Start[layer],
+                 $r_crater_top * pow($exp_fact, layer),
+                 $atm_top_z * layer_fraction[layer],
+                 0.0,
+                 0.0,
+                 "z0 ExtCyl");
+
+        makeArcs(L_inrDup_Start[layer],
+                 $r_crater_top * pow($exp_fact, layer),
+                 $atm_top_z * layer_fraction[layer],
+                 0.0,
+                 0.0,
+                 "z0 ExtCyl");
+
+        makeArcs(L_icyl_Start[layer],
+                 storedRadiusCyl[layer],
+                 $atm_top_z * layer_fraction[layer],
+                 0.0,
+                 0.0,
+                 "z0 ExtCyl");
+
+    }
+
     /*
 
     // --- Define Arcs for z=0 External Cylinder ---
@@ -1242,33 +1552,72 @@ codeInclude
     os << "        faces" << endl;
     os << "        (" << endl;
 
+    // --- Conduit Patches (ONLY IF CONDUIT EXISTS) ---
+    if ($h_conduit > 0)
+    {
+        // Base faces of the 4 Center Conduit blocks
+        for (int q = 0; q < 4; ++q)
+        {
+            int oct_idx0 = (q * 2 + 0) % 8;
+            int oct_idx1 = (q * 2 + 1) % 8;
+            int oct_idx2 = (q * 2 + 2) % 8;
+            os << "            (" << L_condBase_center << " "
+               << vIdx(L_condBase_oct_Start, oct_idx0) << " "
+               << vIdx(L_condBase_oct_Start, oct_idx1) << " "
+               << vIdx(L_condBase_oct_Start, oct_idx2) << ") // Conduit Inlet Ctr " << q << endl;
+        }
+
+        // Base faces of the 8 Outer Conduit blocks
+        for (int i = 0; i < 8; ++i)
+        {
+            int i_plus_1 = (i + 1) % 8;
+            os << "            (" << vIdx(L_condBase_oct_Start, i) << " "
+               << vIdx(L_condBase_outer_Start, i) << " "
+               << vIdx(L_condBase_outer_Start, i_plus_1) << " "
+               << vIdx(L_condBase_oct_Start, i_plus_1) << ") // Conduit Inlet Outer " << i << endl;
+        }
+
+        for (int i = 0; i < 8; ++i)
+        {
+            int i_plus_1 = (i + 1) % 8;
+            // Face vertices: CondOuter[i], CrOuter[i], CrOuter[i+1], CondOuter[i+1]
+            os << "            (" << vIdx(L_condBase_outer_Start, i) << " "
+               << vIdx(L_crBase_outer_Start, i) << " "
+               << vIdx(L_crBase_outer_Start, i_plus_1) << " "
+               << vIdx(L_condBase_outer_Start, i_plus_1) << ") // Conduit Wall " << i << endl;
+        }
+    }
+
     // --- Crater Base Faces ---
-    os << "            // Crater Base Faces (Center Blocks + Outer Blocks)"
-       << endl;
-    // Base faces of the 4 Center Crater blocks
-    for (int q = 0; q < 4; ++q)
+    if ($h_conduit == 0)
     {
-        int oct_idx0 = (q * 2 + 0) % 8;
-        int oct_idx1 = (q * 2 + 1) % 8;
-        int oct_idx2 = (q * 2 + 2) % 8;
-        // Base Face vertices: Ctr, Oct[idx0], Oct[idx1], Oct[idx2]
-        os << "            (" << L_crBase_center << " "
-           << vIdx(L_crBase_oct_Start, oct_idx0) << " "
-           << vIdx(L_crBase_oct_Start, oct_idx1) << " "
-           << vIdx(L_crBase_oct_Start, oct_idx2) << ") // Cr Base Ctr Quad "
-           << q << endl;
-    }
-    // Base faces of the 8 Outer Crater blocks
-    for (int i = 0; i < 8; ++i)
-    {
-        int i_plus_1 = (i + 1) % 8;
-        // Base Face vertices: CrOct[i], CrOuter[i], CrOuter[i+1], CrOct[i+1]
-        os << "            (" << vIdx(L_crBase_oct_Start, i) << " "
-           << vIdx(L_crBase_outer_Start, i) << " "
-           << vIdx(L_crBase_outer_Start, i_plus_1) << " "
-           << vIdx(L_crBase_oct_Start, i_plus_1) << ") // Cr Base Outer Seg "
-           << i << endl;
-    }
+        os << "            // Crater Base Faces (Center Blocks + Outer Blocks)"
+           << endl;
+        // Base faces of the 4 Center Crater blocks
+        for (int q = 0; q < 4; ++q)
+        {
+            int oct_idx0 = (q * 2 + 0) % 8;
+            int oct_idx1 = (q * 2 + 1) % 8;
+            int oct_idx2 = (q * 2 + 2) % 8;
+            // Base Face vertices: Ctr, Oct[idx0], Oct[idx1], Oct[idx2]
+            os << "            (" << L_crBase_center << " "
+               << vIdx(L_crBase_oct_Start, oct_idx0) << " "
+               << vIdx(L_crBase_oct_Start, oct_idx1) << " "
+               << vIdx(L_crBase_oct_Start, oct_idx2) << ") // Cr Base Ctr Quad "
+               << q << endl;
+        }
+        // Base faces of the 8 Outer Crater blocks
+        for (int i = 0; i < 8; ++i)
+        {
+            int i_plus_1 = (i + 1) % 8;
+            // Base Face vertices: CrOct[i], CrOuter[i], CrOuter[i+1], CrOct[i+1]
+            os << "            (" << vIdx(L_crBase_oct_Start, i) << " "
+               << vIdx(L_crBase_outer_Start, i) << " "
+               << vIdx(L_crBase_outer_Start, i_plus_1) << " "
+               << vIdx(L_crBase_oct_Start, i_plus_1) << ") // Cr Base Outer Seg "
+               << i << endl;
+        }
+    }    
 
     // --- Crater Wall Faces ---
     // These are the outermost vertical faces of the 8 Outer Crater blocks.
