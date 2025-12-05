@@ -72,7 +72,6 @@ interfacialModels/dragModels/NonSphericalErgun/NonSphericalErgun.C
 interfacialModels/dragModels/NonSphericalWenYu/NonSphericalWenYu.C
 interfacialModels/dragModels/NonSphericalGidaspowErgunWenYu/NonSphericalGidaspowErgunWenYu.C
 interfacialModels/dragModels/solidSolidDrag/solidSolidDrag.C
-interfacialModels/dragModels/carnahanStarlingSolidDrag/carnahanStarlingSolidDrag.C
 
 interfacialModels/dragModels/timeScaleFilteredDrag/timeScaleFilteredDrag.C
 

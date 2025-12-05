@@ -50,7 +50,7 @@ Foam::dragModels::solidSolidDrag::KSolidSolid
  const phaseModel& solid2
  ) const
 {
- if (PPdrag_ == "solidSolid")
+ if (PPdrag_ == "SinclairJackson")
     {
       const phaseSystem& fluid = gas.fluid();
       const volScalarField& alphag = gas;
