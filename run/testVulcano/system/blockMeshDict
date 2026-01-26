@@ -31,6 +31,8 @@ codeInclude
     const Foam::scalarList& atmCells_aspect_ratio_top =
         dict.lookup("atmCells_aspect_ratio_top");
 
+    bool square_flag = dict.lookupOrDefault<bool>("square_flag", false);
+    
     List<scalar> layer_fraction($n_vert_layers + 1, 0.0);
 
     layer_fraction[$n_vert_layers] = 1.0;            
@@ -692,15 +694,25 @@ codeInclude
             addVertex(points[L_bottom_inr_Start[listIdxBottom] + k],
                       "L" + Foam::name(layer) + " BtmInrDup");
 
+        scalar curvCoeff = cos(radAngle);
+
+        scalar r_axis = r_icyl;
+        scalar r_diag = r_icyl * curvCoeff;
+        
+        if (layer == 1 && square_flag)
+        {
+            r_axis = r_icyl * curvCoeff;
+        }
+        
         makeRing(L_bottom_icyl_Start[listIdxBottom],
-                 r_icyl,
-                 r_icyl * cos(radAngle),
+                 r_axis,
+                 r_diag,
                  z_level,
                  dx,
                  dy,
                  "L" + Foam::name(layer) + " Btm",
                  "ICyl");
-        
+
         // --- Far Field Vertices (Systematic N=0, CCW Indexing) ---
         L_bottom_far_Start[listIdxBottom] = vertexCount; // Or listIdx for z=0
         string prefix =
@@ -1442,12 +1454,15 @@ codeInclude
                  "z0 InrDup");
     }
 
-    makeArcs(L_bottom_icyl_Start[1],
+    if ( !square_flag )
+    {
+        makeArcs(L_bottom_icyl_Start[1],
              storedRadiusCyl[0],
              $crater_top_z,
              0.0,
              0.0,
              "z0 ExtCyl");
+    }         
 
     label layer = 1;
 
@@ -1465,12 +1480,14 @@ codeInclude
              0.0,
              "z0 ExtCyl");
 
+    /*
     makeArcs(L_icyl_Start[layer],
              storedRadiusCyl[layer],
              $atm_top_z * layer_fraction[layer],
              0.0,
              0.0,
-             "z0 ExtCyl");             
+             "z0 ExtCyl"); 
+    */                     
 
     for (label layer = 2; layer <= $n_vert_layers; ++layer)
     {
