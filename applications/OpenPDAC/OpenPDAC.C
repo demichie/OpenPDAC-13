@@ -31,7 +31,9 @@ License
 #include "fvcMeshPhi.H"
 #include "addToRunTimeSelectionTable.H"
 #include "myHydrostaticInitialisation.H"
-
+//#include "polyTopoChangeMap.H"
+//#include "polyMeshMap.H"
+//#include "collidingCloud.H"
 #include "IOobjectList.H"
 
 // * * * * * * * * * * * * * * Static Data Members * * * * * * * * * * * * * //
@@ -250,8 +252,6 @@ Foam::solvers::OpenPDAC::OpenPDAC(fvMesh& mesh)
     
     carrierIdx(0),
 
-    muC(phases_[carrierIdx].fluidThermo().mu()),
-
     muMix
     (
         IOobject
@@ -279,7 +279,10 @@ Foam::solvers::OpenPDAC::OpenPDAC(fvMesh& mesh)
     ),
     
     // Initialize cloud
-    clouds(rho, U, muMix, buoyancy.g),
+    clouds
+    (
+        parcelClouds::New(mesh, rho, U, muMix, buoyancy.g)
+    ),
     
     pressureReference
     (
@@ -356,8 +359,7 @@ Foam::solvers::OpenPDAC::OpenPDAC(fvMesh& mesh)
     // Carrier phase viscosity
     const word&continuousPhaseName = fluid.continuousPhaseName();
         
-    muC = phases_[continuousPhaseName].fluidThermo().mu();
-    
+    const volScalarField& muC = phases_[continuousPhaseName].fluidThermo().mu();
     Info<< "min muC " << min(muC).value() << " max muC " << max(muC).value() << endl;
 
     volScalarField alphasMax = fluid_.alfasMax();
@@ -376,7 +378,10 @@ Foam::solvers::OpenPDAC::OpenPDAC(fvMesh& mesh)
 
     }
 
-    clouds.info();
+    forAll(clouds, cI)
+    {
+        clouds[cI].info();
+    }
     
     if (pimple.dict().lookupOrDefault<bool>("hydrostaticInitialisation", false))
     {
@@ -448,9 +453,13 @@ void Foam::solvers::OpenPDAC::preSolve()
         );
     }
 
+    if (mesh.topoChanging() || mesh.distributing())
+    {
+        clouds.storeGlobalPositions();
+    }
+
     fvModels().preUpdateMesh();
 
-    // Update the mesh for topology change, mesh to mesh mapping
     mesh_.update();
 }
 
@@ -528,12 +537,25 @@ void Foam::solvers::OpenPDAC::thermophysicalTransportCorrector()
 void Foam::solvers::OpenPDAC::postSolve()
 {
     divU.clear();
-    
+
+    if (mesh.topoChanged())
+    {
+        muMix.primitiveFieldRef() = 0.0; // Pulisce i valori vecchi
+    }
+
     volScalarField alphasMax = fluid_.alfasMax();
+
+    const word& continuousPhaseName = fluid.continuousPhaseName();
     
-    const word&continuousPhaseName = fluid.continuousPhaseName();
+    volScalarField alphaS = 1.0 - max(0.0, min(1.0, phases[continuousPhaseName]));
+    volScalarField base = max(0.01, 1.0 - alphaS/alphasMax);
+
+    const volScalarField& muC = phases[continuousPhaseName].fluidThermo().mu();
+    volScalarField muTemp = muC * pow(base, -1.55);
+
+    muMix = max(muTemp, muC);
     
-    muMix = muC * pow( max(0.0, 1.0 - ( 1.0 - max(0.0,phases[continuousPhaseName]) )) / alphasMax , -1.55);
+    muMix.correctBoundaryConditions();
 
     rho = fluid_.rho();
     
@@ -544,8 +566,6 @@ void Foam::solvers::OpenPDAC::postSolve()
         U += phase * phase.rho() * phase.U() / rho;
 
     }
-
-    Info<< "min mu " << min(muMix).value() << " max mu " << max(muMix).value() << endl;
 
     clouds.evolve();
             

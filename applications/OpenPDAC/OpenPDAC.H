@@ -59,6 +59,7 @@ See also
 #include "buoyancy.H"
 #include "pressureReference.H"
 #include "parcelCloudList.H"
+#include "parcelClouds.H"
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
@@ -164,7 +165,7 @@ protected:
         label carrierIdx;
         
         // carrier phase viscosity
-        volScalarField muC;
+        // volScalarField muC;
 
         // mixture viscosity
         volScalarField muMix;
@@ -172,7 +173,7 @@ protected:
         // mixture velocity         
         volVectorField U;
         
-        parcelCloudList clouds;
+        parcelClouds& clouds;
         
         scalar p_ratio;
 
