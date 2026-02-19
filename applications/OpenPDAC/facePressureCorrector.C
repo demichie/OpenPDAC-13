@@ -43,6 +43,13 @@ License
 
 void Foam::solvers::OpenPDAC::facePressureCorrector()
 {
+
+    if (forceFinalPimpleIter_ && !pimple.finalIter())
+    {
+        UEqns.clear();
+        return; 
+    }
+
     volScalarField& p(p_);
     volScalarField& p_rgh = p_rgh_;
 
