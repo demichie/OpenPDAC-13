@@ -54,7 +54,6 @@ See also
 #include "fluidSolver.H"
 #include "momentumTransferSystem.H"
 #include "heatTransferSystem.H"
-#include "populationBalanceSystem.H"
 #include "phaseCompressibleMomentumTransportModel.H"
 #include "buoyancy.H"
 #include "pressureReference.H"
@@ -152,8 +151,6 @@ protected:
         momentumTransferSystem momentumTransferSystem_;
 
         heatTransferSystem heatTransferSystem_;
-
-        populationBalanceSystem populationBalanceSystem_;
 
     // Thermophysical properties
 

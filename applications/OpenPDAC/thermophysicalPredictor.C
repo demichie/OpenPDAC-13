@@ -35,13 +35,6 @@ License
 
 void Foam::solvers::OpenPDAC::compositionPredictor()
 {
-    autoPtr<HashPtrTable<fvScalarMatrix>> popBalSpecieTransferPtr =
-        populationBalanceSystem_.specieTransfer();
-    HashPtrTable<fvScalarMatrix>& popBalSpecieTransfer =
-        popBalSpecieTransferPtr();
-
-    fluid_.correctReactions();
-
     forAll(fluid.multicomponentPhases(), multicomponentPhasei)
     {
         phaseModel& phase = fluid_.multicomponentPhases()[multicomponentPhasei];
@@ -54,10 +47,8 @@ void Foam::solvers::OpenPDAC::compositionPredictor()
         {
             if (phase.solveSpecie(i))
             {
-                fvScalarMatrix YiEqn(
-                    phase.YiEqn(Y[i])
-                    == *popBalSpecieTransfer[Y[i].name()]
-                           + fvModels().source(alpha, rho, Y[i]));
+                fvScalarMatrix YiEqn(phase.YiEqn(Y[i])
+                                     == fvModels().source(alpha, rho, Y[i]));
 
                 YiEqn.relax();
 
@@ -86,9 +77,10 @@ void Foam::solvers::OpenPDAC::energyPredictor()
         heatTransferSystem_.heatTransfer();
     HashPtrTable<fvScalarMatrix>& heatTransfer = heatTransferPtr();
 
-    autoPtr<HashPtrTable<fvScalarMatrix>> popBalHeatTransferPtr =
-        populationBalanceSystem_.heatTransfer();
-    HashPtrTable<fvScalarMatrix>& popBalHeatTransfer = popBalHeatTransferPtr();
+    const bool dragEnergyCorrection =
+        pimple.dict().lookupOrDefault<Switch>("dragEnergyCorrection", false);
+    const bool totalEnergy =
+        pimple.dict().lookupOrDefault<Switch>("totalEnergy", false);
 
     forAll(fluid.thermalPhases(), thermalPhasei)
     {
@@ -99,13 +91,12 @@ void Foam::solvers::OpenPDAC::energyPredictor()
 
         fvScalarMatrix EEqn(
             phase.heEqn()
-            == *heatTransfer[phase.name()] + *popBalHeatTransfer[phase.name()]
+            == *heatTransfer[phase.name()]
                    + fvModels().source(alpha, rho, phase.thermo().he()));
 
-        if (pimple.dict().lookupOrDefault<Switch>("dragEnergyCorrection",
-                                                  false))
+        if (dragEnergyCorrection)
         {
-            if (pimple.dict().lookupOrDefault<Switch>("totalEnergy", false))
+            if (totalEnergy)
             {
                 PtrList<volScalarField> dragEnergyTransfers(
                     movingPhases.size());
@@ -128,7 +119,19 @@ void Foam::solvers::OpenPDAC::energyPredictor()
     }
 
     fluid_.correctThermo();
-    fluid_.correctContinuityError(populationBalanceSystem_.dmdts());
+
+    // Initialize dmdts with zeros (no mass transfer)
+    PtrList<volScalarField::Internal> dmdts(fluid.phases().size());
+    forAll(dmdts, i)
+    {
+        dmdts.set(i,
+                  new volScalarField::Internal(
+                      IOobject("dmdt", runTime.name(), mesh),
+                      mesh,
+                      dimensionedScalar(dimDensity / dimTime, 0)));
+    }
+
+    fluid_.correctContinuityError(dmdts);
 }
 
 

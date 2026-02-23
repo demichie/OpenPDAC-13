@@ -30,12 +30,7 @@ License
 
 void Foam::solvers::OpenPDAC::cellMomentumPredictor()
 {
-    Info<< "Constructing momentum equations" << endl;
-
-    autoPtr<HashPtrTable<fvVectorMatrix>> popBalMomentumTransferPtr =
-        populationBalanceSystem_.momentumTransfer();
-    HashPtrTable<fvVectorMatrix>& popBalMomentumTransfer =
-        popBalMomentumTransferPtr();
+    Info << "Constructing momentum equations" << endl;
 
     forAll(movingPhases, movingPhasei)
     {
@@ -45,17 +40,9 @@ void Foam::solvers::OpenPDAC::cellMomentumPredictor()
         const volScalarField& rho = phase.rho();
         volVectorField& U = phase.URef();
 
-        UEqns.set
-        (
-            phase.index(),
-            new fvVectorMatrix
-            (
-                phase.UEqn()
-             ==
-                *popBalMomentumTransfer[phase.name()]
-              + fvModels().source(alpha, rho, U)
-            )
-        );
+        UEqns.set(phase.index(),
+                  new fvVectorMatrix(phase.UEqn()
+                                     == fvModels().source(alpha, rho, U)));
 
         UEqns[phase.index()].relax();
         fvConstraints().constrain(UEqns[phase.index()]);
@@ -67,12 +54,7 @@ void Foam::solvers::OpenPDAC::cellMomentumPredictor()
 
 void Foam::solvers::OpenPDAC::faceMomentumPredictor()
 {
-    Info<< "Constructing face momentum equations" << endl;
-
-    autoPtr<HashPtrTable<fvVectorMatrix>> popBalMomentumTransferPtr =
-        populationBalanceSystem_.momentumTransferf();
-    HashPtrTable<fvVectorMatrix>& popBalMomentumTransfer =
-        popBalMomentumTransferPtr();
+    Info << "Constructing face momentum equations" << endl;
 
     forAll(movingPhases, movingPhasei)
     {
@@ -82,17 +64,9 @@ void Foam::solvers::OpenPDAC::faceMomentumPredictor()
         const volScalarField& rho = phase.rho();
         volVectorField& U = phase.URef();
 
-        UEqns.set
-        (
-            phase.index(),
-            new fvVectorMatrix
-            (
-                phase.UfEqn()
-             ==
-                *popBalMomentumTransfer[phase.name()]
-              + fvModels().source(alpha, rho, U)
-            )
-        );
+        UEqns.set(phase.index(),
+                  new fvVectorMatrix(phase.UfEqn()
+                                     == fvModels().source(alpha, rho, U)));
 
         UEqns[phase.index()].relax();
         fvConstraints().constrain(UEqns[phase.index()]);

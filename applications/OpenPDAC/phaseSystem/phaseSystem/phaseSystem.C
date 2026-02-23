@@ -45,7 +45,7 @@ License
 
 namespace Foam
 {
-    defineTypeNameAndDebug(phaseSystem, 0);
+defineTypeNameAndDebug(phaseSystem, 0);
 }
 
 
@@ -56,22 +56,13 @@ const Foam::word Foam::phaseSystem::propertiesName("phaseProperties");
 
 Foam::tmp<Foam::volScalarField> Foam::phaseSystem::sumAlphaMoving() const
 {
-    tmp<volScalarField> sumAlphaMoving
-    (
-        volScalarField::New
-        (
-            "sumAlphaMoving",
-            movingPhaseModels_[0],
-            calculatedFvPatchScalarField::typeName
-        )
-    );
+    tmp<volScalarField> sumAlphaMoving(
+        volScalarField::New("sumAlphaMoving",
+                            movingPhaseModels_[0],
+                            calculatedFvPatchScalarField::typeName));
 
-    for
-    (
-        label movingPhasei=1;
-        movingPhasei<movingPhaseModels_.size();
-        movingPhasei++
-    )
+    for (label movingPhasei = 1; movingPhasei < movingPhaseModels_.size();
+         movingPhasei++)
     {
         sumAlphaMoving.ref() += movingPhaseModels_[movingPhasei];
     }
@@ -88,9 +79,8 @@ void Foam::phaseSystem::setMixtureU(const volVectorField& Um0)
 
     forAll(movingPhaseModels_, movingPhasei)
     {
-        dUm -=
-            movingPhaseModels_[movingPhasei]
-           *movingPhaseModels_[movingPhasei].U();
+        dUm -= movingPhaseModels_[movingPhasei]
+             * movingPhaseModels_[movingPhasei].U();
     }
 
     forAll(movingPhaseModels_, movingPhasei)
@@ -100,11 +90,8 @@ void Foam::phaseSystem::setMixtureU(const volVectorField& Um0)
 }
 
 
-void Foam::phaseSystem::setMixturePhi
-(
-    const PtrList<surfaceScalarField>& alphafs,
-    const surfaceScalarField& phim0
-)
+void Foam::phaseSystem::setMixturePhi(
+    const PtrList<surfaceScalarField>& alphafs, const surfaceScalarField& phim0)
 {
     // Calculate the mean flux difference with respect to phim0
     // from the current flux of the moving phases
@@ -112,9 +99,8 @@ void Foam::phaseSystem::setMixturePhi
 
     forAll(movingPhaseModels_, movingPhasei)
     {
-        dphim -=
-            alphafs[movingPhaseModels_[movingPhasei].index()]
-           *movingPhaseModels_[movingPhasei].phi();
+        dphim -= alphafs[movingPhaseModels_[movingPhasei].index()]
+               * movingPhaseModels_[movingPhasei].phi();
     }
 
     forAll(movingPhaseModels_, movingPhasei)
@@ -124,11 +110,9 @@ void Foam::phaseSystem::setMixturePhi
 }
 
 
-Foam::tmp<Foam::surfaceVectorField> Foam::phaseSystem::nHatfv
-(
-    const volScalarField& alpha1,
-    const volScalarField& alpha2
-) const
+Foam::tmp<Foam::surfaceVectorField>
+Foam::phaseSystem::nHatfv(const volScalarField& alpha1,
+                          const volScalarField& alpha2) const
 {
     /*
     // Cell gradient of alpha
@@ -139,44 +123,34 @@ Foam::tmp<Foam::surfaceVectorField> Foam::phaseSystem::nHatfv
     surfaceVectorField gradAlphaf = fvc::interpolate(gradAlpha);
     */
 
-    surfaceVectorField gradAlphaf
-    (
-        fvc::interpolate(alpha2)*fvc::interpolate(fvc::grad(alpha1))
-      - fvc::interpolate(alpha1)*fvc::interpolate(fvc::grad(alpha2))
-    );
+    surfaceVectorField gradAlphaf(
+        fvc::interpolate(alpha2) * fvc::interpolate(fvc::grad(alpha1))
+        - fvc::interpolate(alpha1) * fvc::interpolate(fvc::grad(alpha2)));
 
     // Face unit interface normal
-    return gradAlphaf/(mag(gradAlphaf) + deltaN_);
+    return gradAlphaf / (mag(gradAlphaf) + deltaN_);
 }
 
 
-Foam::tmp<Foam::surfaceScalarField> Foam::phaseSystem::nHatf
-(
-    const volScalarField& alpha1,
-    const volScalarField& alpha2
-) const
+Foam::tmp<Foam::surfaceScalarField>
+Foam::phaseSystem::nHatf(const volScalarField& alpha1,
+                         const volScalarField& alpha2) const
 {
     // Face unit interface normal flux
     return nHatfv(alpha1, alpha2) & mesh_.Sf();
 }
 
 
-Foam::tmp<Foam::volScalarField> Foam::phaseSystem::K
-(
-    const phaseModel& phase1,
-    const phaseModel& phase2
-) const
+Foam::tmp<Foam::volScalarField>
+Foam::phaseSystem::K(const phaseModel& phase1, const phaseModel& phase2) const
 {
     tmp<surfaceVectorField> tnHatfv = nHatfv(phase1, phase2);
 
-    correctContactAngle
-    (
-        phase1,
-        phase2,
-        phase1.U()().boundaryField(),
-        deltaN_,
-        tnHatfv.ref().boundaryFieldRef()
-    );
+    correctContactAngle(phase1,
+                        phase2,
+                        phase1.U()().boundaryField(),
+                        deltaN_,
+                        tnHatfv.ref().boundaryFieldRef());
 
     // Simple expression for curvature
     return -fvc::div(tnHatfv & mesh_.Sf());
@@ -185,88 +159,43 @@ Foam::tmp<Foam::volScalarField> Foam::phaseSystem::K
 
 // * * * * * * * * * * * * * * * * Constructors  * * * * * * * * * * * * * * //
 
-Foam::phaseSystem::phaseSystem
-(
-    const fvMesh& mesh
-)
-:
-    IOdictionary
-    (
-        IOobject
-        (
-            propertiesName,
-            mesh.time().constant(),
-            mesh,
-            IOobject::MUST_READ_IF_MODIFIED,
-            IOobject::NO_WRITE
-        )
-    ),
+Foam::phaseSystem::phaseSystem(const fvMesh& mesh)
+: IOdictionary(IOobject(propertiesName,
+                        mesh.time().constant(),
+                        mesh,
+                        IOobject::MUST_READ_IF_MODIFIED,
+                        IOobject::NO_WRITE)),
 
-    mesh_(mesh),
+  mesh_(mesh),
 
-    pimple_(mesh_.lookupObject<pimpleNoLoopControl>("solutionControl")),
+  pimple_(mesh_.lookupObject<pimpleNoLoopControl>("solutionControl")),
 
-    MRF_(mesh_),
+  MRF_(mesh_),
 
-    continuousPhaseName_(lookupOrDefault("continuousPhase", word::null)),
- 
-    referencePhaseName_(lookupOrDefault("referencePhase", word::null)),
+  continuousPhaseName_(lookupOrDefault("continuousPhase", word::null)),
 
-    phaseModels_
-    (
-        lookup("phases"),
-        phaseModel::iNew(*this, referencePhaseName_)
-    ),
+  referencePhaseName_(lookupOrDefault("referencePhase", word::null)),
 
-    phi_
-    (
-        IOobject
-        (
-            "phi",
-            mesh.time().name(),
-            mesh
-        ),
+  phaseModels_(lookup("phases"), phaseModel::iNew(*this, referencePhaseName_)),
+
+  phi_(IOobject("phi", mesh.time().name(), mesh),
+       mesh,
+       dimensionedScalar(dimVolumetricFlux, 0)),
+
+  dpdt_(IOobject("dpdt", mesh.time().name(), mesh),
         mesh,
-        dimensionedScalar(dimVolumetricFlux, 0)
-    ),
+        dimensionedScalar(dimPressure / dimTime, 0)),
 
-    dpdt_
-    (
-        IOobject
-        (
-            "dpdt",
-            mesh.time().name(),
-            mesh
-        ),
-        mesh,
-        dimensionedScalar(dimPressure/dimTime, 0)
-    ),
+  cAlphas_(found("interfaceCompression")
+               ? generateInterfacialValues<scalar>(
+                     *this, subDict("interfaceCompression"))
+               : cAlphaTable()),
 
-    cAlphas_
-    (
-        found("interfaceCompression")
-      ? generateInterfacialValues<scalar>
-        (
-            *this,
-            subDict("interfaceCompression")
-        )
-      : cAlphaTable()
-    ),
+  deltaN_("deltaN", 1e-8 / pow(average(mesh_.V()), 1.0 / 3.0)),
 
-    deltaN_
-    (
-        "deltaN",
-        1e-8/pow(average(mesh_.V()), 1.0/3.0)
-    ),
-
-    surfaceTensionCoefficientModels_
-    (
-        generateInterfacialModels<surfaceTensionCoefficientModel>
-        (
-            *this,
-            subDict(modelName<surfaceTensionCoefficientModel>())
-        )
-    )
+  surfaceTensionCoefficientModels_(
+      generateInterfacialModels<surfaceTensionCoefficientModel>(
+          *this, subDict(modelName<surfaceTensionCoefficientModel>())))
 {
     // Groupings
     label movingPhasei = 0;
@@ -313,9 +242,8 @@ Foam::phaseSystem::phaseSystem
 
     forAll(movingPhaseModels_, movingPhasei)
     {
-        phi_ +=
-            fvc::interpolate(movingPhaseModels_[movingPhasei])
-           *movingPhaseModels_[movingPhasei].phi();
+        phi_ += fvc::interpolate(movingPhaseModels_[movingPhasei])
+              * movingPhaseModels_[movingPhasei].phi();
     }
 
     // Write phi
@@ -324,35 +252,33 @@ Foam::phaseSystem::phaseSystem
     // Update motion fields
     correctKinematics();
 
-    Info << "continuousPhaseName_ " << continuousPhaseName_ << endl; 
+    Info << "continuousPhaseName_ " << continuousPhaseName_ << endl;
 
     // Set continuous phase
     if (continuousPhaseName_ == word::null)
     {
         FatalIOErrorInFunction(*this)
-            << "continuousPhase must be specified."
-            << exit(FatalIOError);
+            << "continuousPhase must be specified." << exit(FatalIOError);
     }
     else
     {
         phaseModel* continuousPhasePtr = &phases()[continuousPhaseName_];
-        bool continuousCheck=false;
-    
+        bool continuousCheck = false;
+
         forAll(phaseModels_, phasei)
         {
             if (&phaseModels_[phasei] == continuousPhasePtr)
             {
-                continuousCheck=true;
+                continuousCheck = true;
             }
         }
         if (continuousCheck == false)
         {
             FatalIOErrorInFunction(*this)
-                << "continuousPhase must be specified."
-                << exit(FatalIOError);
-        }    
+                << "continuousPhase must be specified." << exit(FatalIOError);
+        }
     }
-    
+
     // Set the optional reference phase fraction from the other phases
     if (referencePhaseName_ != word::null)
     {
@@ -379,28 +305,24 @@ Foam::phaseSystem::phaseSystem
     // Check for and warn about the type entry being present
     if (found("type"))
     {
-        WarningInFunction
-            << "The phase system type entry - type - in "
-            << relativeObjectPath() << " is no longer used"
-            << endl;
+        WarningInFunction << "The phase system type entry - type - in "
+                          << relativeObjectPath() << " is no longer used"
+                          << endl;
     }
 
     // Check for and warn/error about phase change models being in the old
     // location in constant/phaseProperties
-    const wordList modelEntries
-    ({
-        "phaseTransfer",
-        "saturationTemperature",
-        "interfaceComposition",
-        "diffusiveMassTransfer"
-    });
+    const wordList modelEntries({"phaseTransfer",
+                                 "saturationTemperature",
+                                 "interfaceComposition",
+                                 "diffusiveMassTransfer"});
 
     OStringStream modelEntriesString;
     forAll(modelEntries, i)
     {
-        modelEntriesString<< modelEntries[i];
-        if (i < modelEntries.size() - 2) modelEntriesString<< ", ";
-        if (i == modelEntries.size() - 2) modelEntriesString<< " and ";
+        modelEntriesString << modelEntries[i];
+        if (i < modelEntries.size() - 2) modelEntriesString << ", ";
+        if (i == modelEntries.size() - 2) modelEntriesString << " and ";
     }
 
     label warnOrError = 0; // 1 == warn, 2 = error
@@ -409,9 +331,8 @@ Foam::phaseSystem::phaseSystem
         if (!found(modelEntries[i])) continue;
 
         warnOrError =
-            isDict(modelEntries[i]) && !subDict(modelEntries[i]).empty()
-          ? 2
-          : 1;
+            isDict(modelEntries[i]) && !subDict(modelEntries[i]).empty() ? 2
+                                                                         : 1;
     }
 
     OStringStream msg;
@@ -424,8 +345,7 @@ Foam::phaseSystem::phaseSystem
     }
     if (warnOrError == 1)
     {
-            WarningInFunction
-                << msg.str().c_str() << endl;
+        WarningInFunction << msg.str().c_str() << endl;
     }
     if (warnOrError == 2)
     {
@@ -437,36 +357,27 @@ Foam::phaseSystem::phaseSystem
 
 // * * * * * * * * * * * * * * * * Destructor  * * * * * * * * * * * * * * * //
 
-Foam::phaseSystem::~phaseSystem()
-{}
+Foam::phaseSystem::~phaseSystem() {}
 
 
 // * * * * * * * * * * * * * * Member Functions  * * * * * * * * * * * * * * //
 
 void Foam::phaseSystem::alphaControl::read(const dictionary& dict)
 {
-    nAlphaSubCyclesPtr = Function1<scalar>::New
-    (
-        dict.found("nAlphaSubCycles")
-          ? "nAlphaSubCycles"
-          : "nSubCycles",
+    nAlphaSubCyclesPtr = Function1<scalar>::New(
+        dict.found("nAlphaSubCycles") ? "nAlphaSubCycles" : "nSubCycles",
         dimless,
         dimless,
-        dict
-    );
+        dict);
 
-    nAlphaCorr = dict.lookupOrDefaultBackwardsCompatible<label>
-    (
-        {"nCorrectors", "nAlphaCorr"},
-        1
-    );
+    nAlphaCorr = dict.lookupOrDefaultBackwardsCompatible<label>(
+        {"nCorrectors", "nAlphaCorr"}, 1);
 
     MULESCorr = dict.lookupOrDefault<Switch>("MULESCorr", false);
 
     MULESCorrRelax = dict.lookupOrDefault<scalar>("MULESCorrRelax", 0.5);
 
-    vDotResidualAlpha =
-        dict.lookupOrDefault("vDotResidualAlpha", 1e-4);
+    vDotResidualAlpha = dict.lookupOrDefault("vDotResidualAlpha", 1e-4);
 
     MULES.read(dict);
 
@@ -482,18 +393,14 @@ void Foam::phaseSystem::alphaControl::correct(const scalar CoNum)
 
 Foam::tmp<Foam::volScalarField> Foam::phaseSystem::rho() const
 {
-    tmp<volScalarField> rho(movingPhaseModels_[0]*movingPhaseModels_[0].rho());
+    tmp<volScalarField> rho(movingPhaseModels_[0]
+                            * movingPhaseModels_[0].rho());
 
-    for
-    (
-        label movingPhasei=1;
-        movingPhasei<movingPhaseModels_.size();
-        movingPhasei++
-    )
+    for (label movingPhasei = 1; movingPhasei < movingPhaseModels_.size();
+         movingPhasei++)
     {
-        rho.ref() +=
-            movingPhaseModels_[movingPhasei]
-           *movingPhaseModels_[movingPhasei].rho();
+        rho.ref() += movingPhaseModels_[movingPhasei]
+                   * movingPhaseModels_[movingPhasei].rho();
     }
 
     if (stationaryPhaseModels_.empty())
@@ -502,7 +409,7 @@ Foam::tmp<Foam::volScalarField> Foam::phaseSystem::rho() const
     }
     else
     {
-        return rho/sumAlphaMoving();
+        return rho / sumAlphaMoving();
     }
 }
 
@@ -513,91 +420,91 @@ Foam::word Foam::phaseSystem::continuousPhaseName() const
 
 Foam::tmp<Foam::volScalarField> Foam::phaseSystem::alfasMax() const
 {
-    volScalarField alfasMax(0.0*movingPhaseModels_[0]);
+    volScalarField alfasMax(0.0 * movingPhaseModels_[0]);
     alfasMax += 1.0;
 
     volScalarField alphas = movingPhaseModels_[0];
 
-    volScalarField den(0.0*movingPhaseModels_[0]); 
-    volScalarField cxi(0.0*movingPhaseModels_[0]); 
-    volScalarField Xij(0.0*movingPhaseModels_[0]); 
-    volScalarField pij(0.0*movingPhaseModels_[0]); 
-    volScalarField rij(0.0*movingPhaseModels_[0]); 
+    volScalarField den(0.0 * movingPhaseModels_[0]);
+    volScalarField cxi(0.0 * movingPhaseModels_[0]);
+    volScalarField Xij(0.0 * movingPhaseModels_[0]);
+    volScalarField pij(0.0 * movingPhaseModels_[0]);
+    volScalarField rij(0.0 * movingPhaseModels_[0]);
 
-    
-    alphas *=0;
-        
+
+    alphas *= 0;
+
     forAll(phaseModels_, phasei)
     {
         const phaseModel& phase = phaseModels_[phasei];
-        
+
         if (&phase != &phaseModels_[continuousPhaseName_])
         {
             const volScalarField& alphai = phase;
-            alphas += max(alphai,scalar(0));
+            alphas += max(alphai, scalar(0));
         }
     }
-    
+
     forAll(phaseModels_, phasei)
     {
         if (&phaseModels_[phasei] != &phaseModels_[continuousPhaseName_])
-    
+
         {
             den *= 0.0;
-            cxi = phaseModels_[phasei] / max(alphas,1e-10);   
+            cxi = phaseModels_[phasei] / max(alphas, 1e-10);
 
             forAll(phaseModels_, phasej)
             {
-                if (&phaseModels_[phasej] != &phaseModels_[continuousPhaseName_])
+                if (&phaseModels_[phasej]
+                    != &phaseModels_[continuousPhaseName_])
                 {
                     volScalarField di = phaseModels_[phasei].d();
                     volScalarField dj = phaseModels_[phasej].d();
-                    rij = pos0(di-dj)*dj/di + neg(di-dj)*di/dj;
+                    rij = pos0(di - dj) * dj / di + neg(di - dj) * di / dj;
 
                     pij = phaseModels_[phasei].alphaMax();
-                    pij += neg(rij-0.741)* ( phaseModels_[phasei].alphaMax()*
-                          (1-phaseModels_[phasei].alphaMax())*
-                          (1-2.35*rij+1.35*sqr(rij)) );
+                    pij += neg(rij - 0.741)
+                         * (phaseModels_[phasei].alphaMax()
+                            * (1 - phaseModels_[phasei].alphaMax())
+                            * (1 - 2.35 * rij + 1.35 * sqr(rij)));
 
-                    Xij = ( 1.0-sqr(rij) )/(2.0-phaseModels_[phasei].alphaMax());
+                    Xij = (1.0 - sqr(rij))
+                        / (2.0 - phaseModels_[phasei].alphaMax());
 
-                    Xij = pos(dj-di)*Xij + neg0(dj-di)*(1.0-Xij);
+                    Xij = pos(dj - di) * Xij + neg0(dj - di) * (1.0 - Xij);
 
-                    if (phasej==phasei)
+                    if (phasej == phasei)
                     {
                         den += scalar(1.0);
                     }
                     else
                     {
-                        den -= (1-phaseModels_[phasei].alphaMax()/pij)*cxi/Xij;
-                    } 
-                    
+                        den -= (1 - phaseModels_[phasei].alphaMax() / pij) * cxi
+                             / Xij;
+                    }
                 }
             }
-            volScalarField alfasMaxi = phaseModels_[phasei].alphaMax()*max(1.0,1.0/den);
-            alfasMax = min(alfasMax,alfasMaxi);
+            volScalarField alfasMaxi =
+                phaseModels_[phasei].alphaMax() * max(1.0, 1.0 / den);
+            alfasMax = min(alfasMax, alfasMaxi);
         }
     }
 
-    Info<< "alphasMax, min, max = " << min(alfasMax).value() << " " << max(alfasMax).value() << endl;
-    
-    return 1.0*alfasMax;
+    Info << "alphasMax, min, max = " << min(alfasMax).value() << " "
+         << max(alfasMax).value() << endl;
+
+    return 1.0 * alfasMax;
 }
 
 Foam::tmp<Foam::volVectorField> Foam::phaseSystem::U() const
 {
-    tmp<volVectorField> U(movingPhaseModels_[0]*movingPhaseModels_[0].U());
+    tmp<volVectorField> U(movingPhaseModels_[0] * movingPhaseModels_[0].U());
 
-    for
-    (
-        label movingPhasei=1;
-        movingPhasei<movingPhaseModels_.size();
-        movingPhasei++
-    )
+    for (label movingPhasei = 1; movingPhasei < movingPhaseModels_.size();
+         movingPhasei++)
     {
-        U.ref() +=
-            movingPhaseModels_[movingPhasei]
-           *movingPhaseModels_[movingPhasei].U();
+        U.ref() += movingPhaseModels_[movingPhasei]
+                 * movingPhaseModels_[movingPhasei].U();
     }
 
     if (stationaryPhaseModels_.empty())
@@ -606,7 +513,7 @@ Foam::tmp<Foam::volVectorField> Foam::phaseSystem::U() const
     }
     else
     {
-        return U/sumAlphaMoving();
+        return U / sumAlphaMoving();
     }
 }
 
@@ -620,12 +527,10 @@ Foam::phaseSystem::sigma(const phaseInterfaceKey& key) const
     }
     else
     {
-        return volScalarField::New
-        (
+        return volScalarField::New(
             surfaceTensionCoefficientModel::typeName + ":sigma",
             mesh_,
-            dimensionedScalar(surfaceTensionCoefficientModel::dimSigma, 0)
-        );
+            dimensionedScalar(surfaceTensionCoefficientModel::dimSigma, 0));
     }
 }
 
@@ -639,54 +544,35 @@ Foam::phaseSystem::sigma(const phaseInterfaceKey& key, const label patchi) const
     }
     else
     {
-        return tmp<scalarField>
-        (
-            new scalarField(mesh_.boundary()[patchi].size(), 0)
-        );
+        return tmp<scalarField>(
+            new scalarField(mesh_.boundary()[patchi].size(), 0));
     }
 }
 
 
-Foam::tmp<Foam::volScalarField>
-Foam::phaseSystem::nearInterface() const
+Foam::tmp<Foam::volScalarField> Foam::phaseSystem::nearInterface() const
 {
-    tmp<volScalarField> tnearInt
-    (
-        volScalarField::New
-        (
-            "nearInterface",
-            mesh_,
-            dimensionedScalar(dimless, 0)
-        )
-    );
+    tmp<volScalarField> tnearInt(volScalarField::New(
+        "nearInterface", mesh_, dimensionedScalar(dimless, 0)));
 
     forAll(phases(), phasei)
     {
-        tnearInt.ref() = max
-        (
-            tnearInt(),
-            pos0(phases()[phasei] - 0.01)*pos0(0.99 - phases()[phasei])
-        );
+        tnearInt.ref() =
+            max(tnearInt(),
+                pos0(phases()[phasei] - 0.01) * pos0(0.99 - phases()[phasei]));
     }
 
     return tnearInt;
 }
 
 
-Foam::tmp<Foam::surfaceScalarField> Foam::phaseSystem::surfaceTension
-(
-    const phaseModel& phase1
-) const
+Foam::tmp<Foam::surfaceScalarField>
+Foam::phaseSystem::surfaceTension(const phaseModel& phase1) const
 {
-    tmp<surfaceScalarField> tSurfaceTension
-    (
-        surfaceScalarField::New
-        (
-            "surfaceTension",
-            mesh_,
-            dimensionedScalar(dimensionSet(1, -2, -2, 0, 0), 0)
-        )
-    );
+    tmp<surfaceScalarField> tSurfaceTension(surfaceScalarField::New(
+        "surfaceTension",
+        mesh_,
+        dimensionedScalar(dimensionSet(1, -2, -2, 0, 0), 0)));
 
     forAll(phases(), phasej)
     {
@@ -699,11 +585,9 @@ Foam::tmp<Foam::surfaceScalarField> Foam::phaseSystem::surfaceTension
             if (cAlphas_.found(interface))
             {
                 tSurfaceTension.ref() +=
-                    fvc::interpolate(sigma(interface)*K(phase1, phase2))
-                   *(
-                        fvc::interpolate(phase2)*fvc::snGrad(phase1)
-                      - fvc::interpolate(phase1)*fvc::snGrad(phase2)
-                    );
+                    fvc::interpolate(sigma(interface) * K(phase1, phase2))
+                    * (fvc::interpolate(phase2) * fvc::snGrad(phase1)
+                       - fvc::interpolate(phase1) * fvc::snGrad(phase2));
             }
         }
     }
@@ -735,10 +619,8 @@ void Foam::phaseSystem::correct()
 }
 
 
-void Foam::phaseSystem::correctContinuityError
-(
-    const PtrList<volScalarField::Internal>& dmdts
-)
+void Foam::phaseSystem::correctContinuityError(
+    const PtrList<volScalarField::Internal>& dmdts)
 {
     forAll(movingPhaseModels_, movingPhasei)
     {
@@ -746,19 +628,14 @@ void Foam::phaseSystem::correctContinuityError
         const volScalarField& alpha = phase;
         volScalarField& rho = phase.rho();
 
-        volScalarField source
-        (
-            volScalarField::New
-            (
-                IOobject::groupName("source", phase.name()),
-                mesh_,
-                dimensionedScalar(dimDensity/dimTime, 0)
-            )
-        );
+        volScalarField source(
+            volScalarField::New(IOobject::groupName("source", phase.name()),
+                                mesh_,
+                                dimensionedScalar(dimDensity / dimTime, 0)));
 
         if (fvModels().addsSupToField(rho.name()))
         {
-            source += fvModels().source(alpha, rho)&rho;
+            source += fvModels().source(alpha, rho) & rho;
         }
 
         if (dmdts.set(phase.index()))
@@ -875,21 +752,16 @@ void Foam::phaseSystem::correctBoundaryFlux()
         tmp<volVectorField> tU(phase.U());
         const volVectorField::Boundary& UBf = tU().boundaryField();
 
-        FieldField<surfaceMesh::PatchField, scalar> phiRelBf
-        (
-            MRF_.relative(mesh_.Sf().boundaryField() & UBf)
-        );
+        FieldField<surfaceMesh::PatchField, scalar> phiRelBf(
+            MRF_.relative(mesh_.Sf().boundaryField() & UBf));
 
         surfaceScalarField::Boundary& phiBf = phase.phiRef().boundaryFieldRef();
 
         forAll(mesh_.boundary(), patchi)
         {
-            if
-            (
-                isA<fixedValueFvsPatchScalarField>(phiBf[patchi])
-             && !isA<movingWallVelocityFvPatchVectorField>(UBf[patchi])
-             && !isA<movingWallSlipVelocityFvPatchVectorField>(UBf[patchi])
-            )
+            if (isA<fixedValueFvsPatchScalarField>(phiBf[patchi])
+                && !isA<movingWallVelocityFvPatchVectorField>(UBf[patchi])
+                && !isA<movingWallSlipVelocityFvPatchVectorField>(UBf[patchi]))
             {
                 phiBf[patchi] == phiRelBf[patchi];
             }
@@ -898,13 +770,10 @@ void Foam::phaseSystem::correctBoundaryFlux()
 }
 
 
-void Foam::phaseSystem::correctPhi
-(
-    const volScalarField& p_rgh,
-    const autoPtr<volScalarField>& divU,
-    const pressureReference& pressureReference,
-    nonOrthogonalSolutionControl& pimple
-)
+void Foam::phaseSystem::correctPhi(const volScalarField& p_rgh,
+                                   const autoPtr<volScalarField>& divU,
+                                   const pressureReference& pressureReference,
+                                   nonOrthogonalSolutionControl& pimple)
 {
     // Update the phase fluxes from the phase face-velocity and make relative
     forAll(movingPhaseModels_, movingPhasei)
@@ -955,51 +824,34 @@ void Foam::phaseSystem::correctPhi
 
         // Calculate absolute flux
         // from the mapped surface velocity
-        phi_ += alphafs[phasei]*(mesh_.Sf() & phase.UfRef());
+        phi_ += alphafs[phasei] * (mesh_.Sf() & phase.UfRef());
     }
 
     if (incompressible())
     {
-        fv::correctPhi
-        (
-            phi_,
-            movingPhaseModels_[0].U(),
-            p_rgh,
-            autoPtr<volScalarField>(),
-            divU,
-            pressureReference,
-            pimple
-        );
+        fv::correctPhi(phi_,
+                       movingPhaseModels_[0].U(),
+                       p_rgh,
+                       autoPtr<volScalarField>(),
+                       divU,
+                       pressureReference,
+                       pimple);
     }
     else
     {
-        volScalarField psi
-        (
-            volScalarField::New
-            (
-                "psi",
-                mesh_,
-                dimensionedScalar(dimless/dimPressure, 0)
-            )
-        );
+        volScalarField psi(volScalarField::New(
+            "psi", mesh_, dimensionedScalar(dimless / dimPressure, 0)));
 
         forAll(phases(), phasei)
         {
             phaseModel& phase = phases()[phasei];
             const volScalarField& alpha = phase;
 
-            psi += alpha*phase.fluidThermo().psi()/phase.rho();
+            psi += alpha * phase.fluidThermo().psi() / phase.rho();
         }
 
-        fv::correctPhi
-        (
-            phi_,
-            p_rgh,
-            psi,
-            autoPtr<volScalarField>(),
-            divU(),
-            pimple
-        );
+        fv::correctPhi(
+            phi_, p_rgh, psi, autoPtr<volScalarField>(), divU(), pimple);
     }
 
     // Make the flux relative to the mesh motion
@@ -1036,11 +888,11 @@ Foam::tmp<Foam::volScalarField> Foam::byDt(const volScalarField& vf)
 {
     if (fv::localEulerDdt::enabled(vf.mesh()))
     {
-        return fv::localEulerDdt::localRDeltaT(vf.mesh())*vf;
+        return fv::localEulerDdt::localRDeltaT(vf.mesh()) * vf;
     }
     else
     {
-        return vf/vf.mesh().time().deltaT();
+        return vf / vf.mesh().time().deltaT();
     }
 }
 
@@ -1049,11 +901,11 @@ Foam::tmp<Foam::surfaceScalarField> Foam::byDt(const surfaceScalarField& sf)
 {
     if (fv::localEulerDdt::enabled(sf.mesh()))
     {
-        return fv::localEulerDdt::localRDeltaTf(sf.mesh())*sf;
+        return fv::localEulerDdt::localRDeltaTf(sf.mesh()) * sf;
     }
     else
     {
-        return sf/sf.mesh().time().deltaT();
+        return sf / sf.mesh().time().deltaT();
     }
 }
 

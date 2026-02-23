@@ -31,9 +31,9 @@ License
 #include "fvcMeshPhi.H"
 #include "addToRunTimeSelectionTable.H"
 #include "myHydrostaticInitialisation.H"
-//#include "polyTopoChangeMap.H"
-//#include "polyMeshMap.H"
-//#include "collidingCloud.H"
+// #include "polyTopoChangeMap.H"
+// #include "polyMeshMap.H"
+// #include "collidingCloud.H"
 #include "IOobjectList.H"
 
 // * * * * * * * * * * * * * * Static Data Members * * * * * * * * * * * * * //
@@ -42,8 +42,8 @@ namespace Foam
 {
 namespace solvers
 {
-    defineTypeNameAndDebug(OpenPDAC, 0);
-    addToRunTimeSelectionTable(solver, OpenPDAC, fvMesh);
+defineTypeNameAndDebug(OpenPDAC, 0);
+addToRunTimeSelectionTable(solver, OpenPDAC, fvMesh);
 }
 }
 
@@ -57,42 +57,40 @@ bool Foam::solvers::OpenPDAC::read()
     predictMomentum =
         pimple.dict().lookupOrDefault<bool>("momentumPredictor", false);
 
-    faceMomentum =
-        pimple.dict().lookupOrDefault<Switch>("faceMomentum", false);
+    faceMomentum = pimple.dict().lookupOrDefault<Switch>("faceMomentum", false);
 
     dragCorrection =
         pimple.dict().lookupOrDefault<Switch>("dragCorrection", false);
 
     nEnergyCorrectors =
         pimple.dict().lookupOrDefault<int>("nEnergyCorrectors", 1);
-        
+
     alphaControls.read(mesh.solution().solverDict("alpha"));
 
-    lowPressureTimestepCorrection =     
-        pimple.dict().lookupOrDefault<Switch>("lowPressureTimestepCorrection", false);        
+    lowPressureTimestepCorrection = pimple.dict().lookupOrDefault<Switch>(
+        "lowPressureTimestepCorrection", false);
 
-    correctTdispersed =     
-        pimple.dict().lookupOrDefault<Switch>("correctTdispersed", false); 
-        
-    nonOrthogonalResidual =     
-        pimple.dict().lookupOrDefault<scalar>("nonOrthogonalResidual", 0.0);        
+    correctTdispersed =
+        pimple.dict().lookupOrDefault<Switch>("correctTdispersed", false);
 
-    innerResidual =     
-        pimple.dict().lookupOrDefault<scalar>("innerResidual", 0.0);        
+    nonOrthogonalResidual =
+        pimple.dict().lookupOrDefault<scalar>("nonOrthogonalResidual", 0.0);
 
-    residualRatio =     
-        pimple.dict().lookupOrDefault<scalar>("residualRatio", 10.0);        
+    innerResidual = pimple.dict().lookupOrDefault<scalar>("innerResidual", 0.0);
 
-    nMaxEnergyCorrectors =     
-        pimple.dict().lookupOrDefault<label>("nMaxEnergyCorrectors", 20);        
+    residualRatio =
+        pimple.dict().lookupOrDefault<scalar>("residualRatio", 10.0);
 
-    useAitkenRelaxation_ = 
+    nMaxEnergyCorrectors =
+        pimple.dict().lookupOrDefault<label>("nMaxEnergyCorrectors", 20);
+
+    useAitkenRelaxation_ =
         pimple.dict().lookupOrDefault<Switch>("useAitkenRelaxation", false);
 
     if (pimple.dict().found("energyControl"))
-            {
-                energyControlDict = pimple.dict().subDict("energyControl");
-            }
+    {
+        energyControlDict = pimple.dict().subDict("energyControl");
+    }
 
 
     return true;
@@ -101,53 +99,48 @@ bool Foam::solvers::OpenPDAC::read()
 
 void Foam::solvers::OpenPDAC::correctCoNum()
 {
-    scalarField sumPhi
-    (
-        fvc::surfaceSum(mag(phi))().primitiveField()
-    );
+    scalarField sumPhi(fvc::surfaceSum(mag(phi))().primitiveField());
 
     forAll(movingPhases, movingPhasei)
     {
-        sumPhi = max
-        (
-            sumPhi,
-            fvc::surfaceSum(mag(movingPhases[movingPhasei].phi()))()
-           .primitiveField()
-        );
+        sumPhi = max(sumPhi,
+                     fvc::surfaceSum(mag(movingPhases[movingPhasei].phi()))()
+                         .primitiveField());
     }
 
     if (lowPressureTimestepCorrection)
     {
         volScalarField alphasMax = fluid_.alfasMax();
-        const word&continuousPhaseName = fluid.continuousPhaseName();
+        const word& continuousPhaseName = fluid.continuousPhaseName();
         volScalarField alfaCont = fluid.phases()[continuousPhaseName];
-    
-        scalarField alfa_ratio = pow(max(0*alphasMax,alphasMax-alfaCont)/alphasMax,0.5);
 
-        Info<< "p_ratio = " << p_ratio << endl;
-        Info<< "alfa_ratio: min = " << min(alfa_ratio) << endl;
+        scalarField alfa_ratio =
+            pow(max(0 * alphasMax, alphasMax - alfaCont) / alphasMax, 0.5);
+
+        Info << "p_ratio = " << p_ratio << endl;
+        Info << "alfa_ratio: min = " << min(alfa_ratio) << endl;
         sumPhi /= sqrt(p_ratio);
     }
-    
 
-    CoNum_ = 0.5*gMax(sumPhi/mesh.V().primitiveField())*runTime.deltaTValue();
 
-    const scalar meanCoNum =
-        0.5
-       *(gSum(sumPhi)/gSum(mesh.V().primitiveField()))
-       *runTime.deltaTValue();
+    CoNum_ =
+        0.5 * gMax(sumPhi / mesh.V().primitiveField()) * runTime.deltaTValue();
+
+    const scalar meanCoNum = 0.5
+                           * (gSum(sumPhi) / gSum(mesh.V().primitiveField()))
+                           * runTime.deltaTValue();
 
     if (lowPressureTimestepCorrection)
     {
-        Info<< "Courant Number mean: " << meanCoNum*sqrt(p_ratio)
-            << " max: " << CoNum*sqrt(p_ratio) << endl;
-        Info<< "Modified Courant Number mean: " << meanCoNum
-            << " max: " << CoNum << endl;
+        Info << "Courant Number mean: " << meanCoNum * sqrt(p_ratio)
+             << " max: " << CoNum * sqrt(p_ratio) << endl;
+        Info << "Modified Courant Number mean: " << meanCoNum
+             << " max: " << CoNum << endl;
     }
     else
     {
-        Info<< "Courant Number mean: " << meanCoNum*p_ratio
-            << " max: " << CoNum << endl;
+        Info << "Courant Number mean: " << meanCoNum * p_ratio
+             << " max: " << CoNum << endl;
     }
 }
 
@@ -155,158 +148,87 @@ void Foam::solvers::OpenPDAC::correctCoNum()
 // * * * * * * * * * * * * * * * * Constructors  * * * * * * * * * * * * * * //
 
 Foam::solvers::OpenPDAC::OpenPDAC(fvMesh& mesh)
-:
-    fluidSolver(mesh),
+: fluidSolver(mesh),
 
-    predictMomentum
-    (
-        pimple.dict().lookupOrDefault<Switch>("momentumPredictor", false)
-    ),
+  predictMomentum(
+      pimple.dict().lookupOrDefault<Switch>("momentumPredictor", false)),
 
-    faceMomentum
-    (
-        pimple.dict().lookupOrDefault<Switch>("faceMomentum", false)
-    ),
+  faceMomentum(pimple.dict().lookupOrDefault<Switch>("faceMomentum", false)),
 
-    dragCorrection
-    (
-        pimple.dict().lookupOrDefault<Switch>("dragCorrection", false)
-    ),
+  dragCorrection(
+      pimple.dict().lookupOrDefault<Switch>("dragCorrection", false)),
 
-    nEnergyCorrectors
-    (
-        pimple.dict().lookupOrDefault<int>("nEnergyCorrectors", 1)
-    ),
+  nEnergyCorrectors(pimple.dict().lookupOrDefault<int>("nEnergyCorrectors", 1)),
 
-    lowPressureTimestepCorrection
-    (
-        pimple.dict().lookupOrDefault<Switch>("lowPressureTimestepCorrection", false)
-    ),
-    
-    trDeltaT
-    (
-        LTS
-      ? new volScalarField
-        (
-            IOobject
-            (
-                fv::localEulerDdt::rDeltaTName,
-                runTime.name(),
-                mesh,
-                IOobject::READ_IF_PRESENT,
-                IOobject::AUTO_WRITE
-            ),
-            mesh,
-            dimensionedScalar(dimless/dimTime, 1),
-            extrapolatedCalculatedFvPatchScalarField::typeName
-        )
-      : nullptr
-    ),
+  lowPressureTimestepCorrection(pimple.dict().lookupOrDefault<Switch>(
+      "lowPressureTimestepCorrection", false)),
 
-    trDeltaTf
-    (
-        LTS && faceMomentum
-      ? new surfaceScalarField
-        (
-            IOobject
-            (
-                fv::localEulerDdt::rDeltaTfName,
-                runTime.name(),
-                mesh,
-                IOobject::READ_IF_PRESENT,
-                IOobject::AUTO_WRITE
-            ),
-            mesh,
-            dimensionedScalar(dimless/dimTime, 1)
-        )
-      : nullptr
-    ),
+  trDeltaT(LTS ? new volScalarField(
+                     IOobject(fv::localEulerDdt::rDeltaTName,
+                              runTime.name(),
+                              mesh,
+                              IOobject::READ_IF_PRESENT,
+                              IOobject::AUTO_WRITE),
+                     mesh,
+                     dimensionedScalar(dimless / dimTime, 1),
+                     extrapolatedCalculatedFvPatchScalarField::typeName)
+               : nullptr),
 
-    buoyancy(mesh),
+  trDeltaTf(LTS && faceMomentum ? new surfaceScalarField(
+                                      IOobject(fv::localEulerDdt::rDeltaTfName,
+                                               runTime.name(),
+                                               mesh,
+                                               IOobject::READ_IF_PRESENT,
+                                               IOobject::AUTO_WRITE),
+                                      mesh,
+                                      dimensionedScalar(dimless / dimTime, 1))
+                                : nullptr),
 
-    fluid_(mesh),
+  buoyancy(mesh),
 
-    phases_(fluid_.phases()),
+  fluid_(mesh),
 
-    movingPhases_(fluid_.movingPhases()),
+  phases_(fluid_.phases()),
 
-    phi_(fluid_.phi()),
+  movingPhases_(fluid_.movingPhases()),
 
-    momentumTransferSystem_(fluid_),
+  phi_(fluid_.phi()),
 
-    heatTransferSystem_(fluid_),
+  momentumTransferSystem_(fluid_),
 
-    populationBalanceSystem_(fluid_),
+  heatTransferSystem_(fluid_),
 
-    p_(movingPhases_[0].fluidThermo().p()),
+  p_(movingPhases_[0].fluidThermo().p()),
 
-    p_rgh_(buoyancy.p_rgh),
+  p_rgh_(buoyancy.p_rgh),
 
-    rho
-    (
-        IOobject
-        (
-            "rho",
-            runTime.name(),
-            mesh,
-            IOobject::NO_READ,
-            IOobject::AUTO_WRITE
-        ),
-        fluid_.rho()
-    ),
-    
-    carrierIdx(0),
+  rho(IOobject(
+          "rho", runTime.name(), mesh, IOobject::NO_READ, IOobject::AUTO_WRITE),
+      fluid_.rho()),
 
-    muMix
-    (
-        IOobject
-        (
-            "muMix",
-            runTime.name(),
-            mesh,
-            IOobject::NO_READ,
-            IOobject::AUTO_WRITE
-        ),
-        mesh
-    ),
-        
-    U
-    (
-        IOobject
-        (
-            "U",
-            runTime.name(),
-            mesh,
-            IOobject::NO_READ,
-            IOobject::AUTO_WRITE
-        ),
-        mesh
-    ),
-    
-    // Initialize cloud
-    clouds
-    (
-        parcelClouds::New(mesh, rho, U, muMix, buoyancy.g)
-    ),
-    
-    pressureReference
-    (
-        p_,
-        p_rgh_,
-        pimple.dict(),
-        fluid_.incompressible()
-    ),
+  carrierIdx(0),
 
-    MRF(fluid_.MRF()),
+  muMix(IOobject("muMix",
+                 runTime.name(),
+                 mesh,
+                 IOobject::NO_READ,
+                 IOobject::AUTO_WRITE),
+        mesh),
 
-    fluid(fluid_),
-    phases(phases_),
-    movingPhases(movingPhases_),
-    momentumTransfer(momentumTransferSystem_),
-    heatTransfer(heatTransferSystem_),
-    p(p_),
-    p_rgh(p_rgh_),
-    phi(phi_)
+  U(IOobject(
+        "U", runTime.name(), mesh, IOobject::NO_READ, IOobject::AUTO_WRITE),
+    mesh),
+
+  // Initialize cloud
+  clouds(parcelClouds::New(mesh, rho, U, muMix, buoyancy.g)),
+
+  pressureReference(p_, p_rgh_, pimple.dict(), fluid_.incompressible()),
+
+  MRF(fluid_.MRF()),
+
+  fluid(fluid_), phases(phases_), movingPhases(movingPhases_),
+  momentumTransfer(momentumTransferSystem_), heatTransfer(heatTransferSystem_),
+  p(p_), p_rgh(p_rgh_), phi(phi_)
 {
     // Read the controls
     read();
@@ -314,106 +236,94 @@ Foam::solvers::OpenPDAC::OpenPDAC(fvMesh& mesh)
     mesh.schemes().setFluxRequired(p_rgh.name());
 
     // create ph_rgh (p_rgh for hydrostatic pressure)
-    volScalarField& ph_rgh = regIOobject::store
-    (
-        new volScalarField
-        (
-            IOobject
-            (
-                "ph_rgh",
-                "0",
-                mesh,
-                IOobject::MUST_READ,
-                IOobject::NO_WRITE
-            ),
-            mesh
-        )
-    );
-    
-    // Initialization of hydrostatic pressure profile
-    hydrostaticInitialisation
-    (
-        p_rgh_,
-        ph_rgh,
-        p_,
-        buoyancy.g,
-        buoyancy.hRef,
-        buoyancy.gh,
-        buoyancy.ghf,
-        fluid_,
-        pimple.dict()
-    );
-    
+    volScalarField& ph_rgh = regIOobject::store(new volScalarField(
+        IOobject("ph_rgh", "0", mesh, IOobject::MUST_READ, IOobject::NO_WRITE),
+        mesh));
 
-    // Correct mixture thermodynamics with new pressure    
+    // Initialization of hydrostatic pressure profile
+    hydrostaticInitialisation(p_rgh_,
+                              ph_rgh,
+                              p_,
+                              buoyancy.g,
+                              buoyancy.hRef,
+                              buoyancy.gh,
+                              buoyancy.ghf,
+                              fluid_,
+                              pimple.dict());
+
+
+    // Correct mixture thermodynamics with new pressure
     fluid_.correctThermo();
     rho = fluid_.rho();
 
     Info << "hRef " << buoyancy.hRef.value() << endl;
 
-    Info<< "min p " << min(p_).value() <<
-  	               " max p " << max(p_).value() << endl;
+    Info << "min p " << min(p_).value() << " max p " << max(p_).value() << endl;
 
-    p_ratio = min(p_).value() /p_.weightedAverage(mesh_.V()).value();
-    	                 	                 	               
-    Info<< "min p_rgh " << min(p_rgh).value() <<
-   	               " max p_rgh " << max(p_rgh).value() << endl;
-    Info<< "min rho " << min(rho).value() <<
-   	               " max rho " << max(rho).value() << endl;
+    p_ratio = min(p_).value() / p_.weightedAverage(mesh_.V()).value();
+
+    Info << "min p_rgh " << min(p_rgh).value() << " max p_rgh "
+         << max(p_rgh).value() << endl;
+    Info << "min rho " << min(rho).value() << " max rho " << max(rho).value()
+         << endl;
 
     // Carrier phase viscosity
-    const word&continuousPhaseName = fluid.continuousPhaseName();
-        
+    const word& continuousPhaseName = fluid.continuousPhaseName();
+
     const volScalarField& muC = phases_[continuousPhaseName].fluidThermo().mu();
-    Info<< "min muC " << min(muC).value() << " max muC " << max(muC).value() << endl;
+    Info << "min muC " << min(muC).value() << " max muC " << max(muC).value()
+         << endl;
 
     volScalarField alphasMax = fluid_.alfasMax();
-    Info<< "min alphasMax " << min(alphasMax).value() << " max alphasMax " << max(alphasMax).value() << endl;
-   
+    Info << "min alphasMax " << min(alphasMax).value() << " max alphasMax "
+         << max(alphasMax).value() << endl;
+
     // Mixture viscosity
-    muMix = muC * pow( 1.0 - ( 1.0 - max(0.0,phases[continuousPhaseName]) ) / alphasMax , -1.55);
-    Info<< "min muMix " << min(muMix).value() << " max muMix " << max(muMix).value() << endl;
-   
+    muMix = muC
+          * pow(1.0 - (1.0 - max(0.0, phases[continuousPhaseName])) / alphasMax,
+                -1.55);
+    Info << "min muMix " << min(muMix).value() << " max muMix "
+         << max(muMix).value() << endl;
+
     // Compute mass-weighted mixture velocity
-    U = 0.0* phases_[0].U();
+    U = 0.0 * phases_[0].U();
     forAll(phases_, phasei)
     {
         phaseModel& phase = phases_[phasei];
         U += phase * phase.rho() * phase.U() / rho;
-
     }
 
     forAll(clouds, cI)
     {
         clouds[cI].info();
     }
-    
+
     if (pimple.dict().lookupOrDefault<bool>("hydrostaticInitialisation", false))
     {
- 
+
         const Time& runTime = mesh().time();
         scalar startTime_ = runTime.startTime().value();
         scalar deltaT = runTime.deltaT().value();
 
-        // set small value for deltaT to evolve particles    
-        const_cast<Time&>(runTime).setDeltaT(1.e-5*deltaT);
+        // set small value for deltaT to evolve particles
+        const_cast<Time&>(runTime).setDeltaT(1.e-5 * deltaT);
 
-        // increase time iterator            
+        // increase time iterator
         const_cast<Time&>(runTime)++;
-    
+
         // evolve particle cloud
         clouds.evolve();
-        
+
         // restore startTime
-        const_cast<Time&>(runTime).setTime(startTime_,startTime_);
-                
-        // restore deltaT            
+        const_cast<Time&>(runTime).setTime(startTime_, startTime_);
+
+        // restore deltaT
         const_cast<Time&>(runTime).setDeltaT(deltaT);
 
         // write everything (including lagrangian)
         const_cast<Time&>(runTime).writeNow();
-    }  
-    
+    }
+
 
     if (transient())
     {
@@ -424,8 +334,7 @@ Foam::solvers::OpenPDAC::OpenPDAC(fvMesh& mesh)
 
 // * * * * * * * * * * * * * * * * Destructor  * * * * * * * * * * * * * * * //
 
-Foam::solvers::OpenPDAC::~OpenPDAC()
-{}
+Foam::solvers::OpenPDAC::~OpenPDAC() {}
 
 
 // * * * * * * * * * * * * * * Member Functions  * * * * * * * * * * * * * * //
@@ -440,7 +349,7 @@ void Foam::solvers::OpenPDAC::preSolve()
     {
         setRDeltaT();
     }
-    
+
     pimpleIter = 0;
     forceFinalPimpleIter_ = false;
     ratioFirstCheck = false;
@@ -451,11 +360,8 @@ void Foam::solvers::OpenPDAC::preSolve()
     if (correctPhi || mesh.topoChanging())
     {
         // Construct and register divU for mapping
-        divU = new volScalarField
-        (
-            "divU0",
-            fvc::div(fvc::absolute(phi, movingPhases[0].U()))
-        );
+        divU = new volScalarField(
+            "divU0", fvc::div(fvc::absolute(phi, movingPhases[0].U())));
     }
 
     if (mesh.topoChanging() || mesh.distributing())
@@ -472,7 +378,7 @@ void Foam::solvers::OpenPDAC::preSolve()
 void Foam::solvers::OpenPDAC::prePredictor()
 {
 
-    pimpleIter++;    
+    pimpleIter++;
 
     if (forceFinalPimpleIter_ && !pimple.finalIter())
     {
@@ -486,12 +392,21 @@ void Foam::solvers::OpenPDAC::prePredictor()
         alphaControls.correct(CoNum);
 
         fluid_.solve(alphaControls, rAs, momentumTransferSystem_);
-        populationBalanceSystem_.solve();
 
         fluid_.correct();
-        populationBalanceSystem_.correct();
 
-        fluid_.correctContinuityError(populationBalanceSystem_.dmdts());
+        // Initialize dmdts with zeros (no mass transfer)
+        PtrList<volScalarField::Internal> dmdts(fluid.phases().size());
+        forAll(dmdts, i)
+        {
+            dmdts.set(i,
+                      new volScalarField::Internal(
+                          IOobject("dmdt", runTime.name(), mesh),
+                          mesh,
+                          dimensionedScalar(dimDensity / dimTime, 0)));
+        }
+
+        fluid_.correctContinuityError(dmdts);
     }
 }
 
@@ -551,29 +466,28 @@ void Foam::solvers::OpenPDAC::postSolve()
     volScalarField alphasMax = fluid_.alfasMax();
 
     const word& continuousPhaseName = fluid.continuousPhaseName();
-    
-    volScalarField alphaS = 1.0 - max(0.0, min(1.0, phases[continuousPhaseName]));
-    volScalarField base = max(0.01, 1.0 - alphaS/alphasMax);
+
+    volScalarField alphaS =
+        1.0 - max(0.0, min(1.0, phases[continuousPhaseName]));
+    volScalarField base = max(0.01, 1.0 - alphaS / alphasMax);
 
     const volScalarField& muC = phases[continuousPhaseName].fluidThermo().mu();
     volScalarField muTemp = muC * pow(base, -1.55);
 
     muMix = max(muTemp, muC);
-    
+
     muMix.correctBoundaryConditions();
 
     rho = fluid_.rho();
-    
+
     U *= 0.0;
     forAll(phases_, phasei)
     {
         phaseModel& phase = phases_[phasei];
         U += phase * phase.rho() * phase.U() / rho;
-
     }
 
     clouds.evolve();
-            
 }
 
 

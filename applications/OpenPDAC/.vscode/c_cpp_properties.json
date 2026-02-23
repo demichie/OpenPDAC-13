@@ -5,7 +5,6 @@
             "includePath": [
                 "${workspaceFolder}/**",
                 "${workspaceFolder}/phaseSystem/lnInclude",
-                "${workspaceFolder}/populationBalance/lnInclude",
                 "${env:WM_PROJECT_DIR}/applications/modules/fluidSolver/lnInclude",
                 "${env:FOAM_SRC}/OpenFOAM/lnInclude",
                 "${env:FOAM_SRC}/finiteVolume/lnInclude",

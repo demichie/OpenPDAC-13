@@ -47,9 +47,9 @@ void Foam::solvers::OpenPDAC::cellPressureCorrector()
     if (forceFinalPimpleIter_ && !pimple.finalIter())
     {
         UEqns.clear();
-        return; 
+        return;
     }
-    
+
     volScalarField& p(p_);
     volScalarField& p_rgh = p_rgh_;
 
@@ -57,7 +57,7 @@ void Foam::solvers::OpenPDAC::cellPressureCorrector()
 
     // Correct p_rgh for consistency with the current density
     // p_rgh = p - rho*buoyancy.gh - buoyancy.pRef;
-    p_rgh = p - rho*buoyancy.gh;
+    p_rgh = p - rho * buoyancy.gh;
 
     // Face volume fractions
     PtrList<surfaceScalarField> alphafs(phases.size());
@@ -87,28 +87,17 @@ void Foam::solvers::OpenPDAC::cellPressureCorrector()
             const phaseModel& phase = movingPhases[movingPhasei];
             const volScalarField& alpha = phase;
 
-            As.set
-            (
-                movingPhasei,
-                UEqns[phase.index()].A()
-              + byDt
-                (
-                    max(phase.residualAlpha() - alpha, scalar(0))
-                   *phase.rho()
-                )
-            );
+            As.set(movingPhasei,
+                   UEqns[phase.index()].A()
+                       + byDt(max(phase.residualAlpha() - alpha, scalar(0))
+                              * phase.rho()));
 
             if (fluid.implicitPhasePressure())
             {
-                rAs.set
-                (
+                rAs.set(
                     phase.index(),
-                    new volScalarField
-                    (
-                        IOobject::groupName("rA", phase.name()),
-                        1/As[movingPhasei]
-                    )
-                );
+                    new volScalarField(IOobject::groupName("rA", phase.name()),
+                                       1 / As[movingPhasei]));
             }
         }
 
@@ -121,11 +110,8 @@ void Foam::solvers::OpenPDAC::cellPressureCorrector()
     {
         PtrList<surfaceScalarField> Ffs(momentumTransferSystem_.Fs());
 
-        const surfaceScalarField ghSnGradRho
-        (
-            "ghSnGradRho",
-            buoyancy.ghf*fvc::snGrad(rho)*mesh.magSf()
-        );
+        const surfaceScalarField ghSnGradRho(
+            "ghSnGradRho", buoyancy.ghf * fvc::snGrad(rho) * mesh.magSf());
 
         UPtrList<surfaceScalarField> movingAlphafs(movingPhases.size());
         PtrList<surfaceScalarField> Fgfs(movingPhases.size());
@@ -136,18 +122,14 @@ void Foam::solvers::OpenPDAC::cellPressureCorrector()
 
             movingAlphafs.set(movingPhasei, &alphafs[phase.index()]);
 
-            Fgfs.set
-            (
-                movingPhasei,
-                Ffs[phase.index()]
-              + alphafs[phase.index()]
-               *(
-                   ghSnGradRho
-                 - fluid.surfaceTension(phase)*mesh.magSf()
-                )
-              - fvc::interpolate(max(phase, phase.residualAlpha()))
-               *fvc::interpolate(phase.rho() - rho)*(buoyancy.g & mesh.Sf())
-            );
+            Fgfs.set(movingPhasei,
+                     Ffs[phase.index()]
+                         + alphafs[phase.index()]
+                               * (ghSnGradRho
+                                  - fluid.surfaceTension(phase) * mesh.magSf())
+                         - fvc::interpolate(max(phase, phase.residualAlpha()))
+                               * fvc::interpolate(phase.rho() - rho)
+                               * (buoyancy.g & mesh.Sf()));
         }
 
         alphaByADfs = invADVfs & movingAlphafs;
@@ -155,8 +137,15 @@ void Foam::solvers::OpenPDAC::cellPressureCorrector()
     }
 
     // Mass transfer rates
-    PtrList<volScalarField::Internal> dmdts(populationBalanceSystem_.dmdts());
-
+    PtrList<volScalarField::Internal> dmdts(fluid.phases().size());
+    forAll(dmdts, i)
+    {
+        dmdts.set(i,
+                  new volScalarField::Internal(
+                      IOobject("dmdt", runTime.name(), mesh),
+                      mesh,
+                      dimensionedScalar(dimDensity / dimTime, 0)));
+    }
     // --- Optional momentum predictor
     if (predictMomentum)
     {
@@ -169,17 +158,11 @@ void Foam::solvers::OpenPDAC::cellPressureCorrector()
                 const phaseModel& phase = movingPhases[movingPhasei];
                 const volScalarField& alpha = phase;
 
-                Hs.set
-                (
-                    movingPhasei,
-                    UEqns[phase.index()].H()
-                  + byDt
-                    (
-                        max(phase.residualAlpha() - alpha, scalar(0))
-                       *phase.rho()
-                    )
-                   *phase.U()().oldTime()
-                );
+                Hs.set(movingPhasei,
+                       UEqns[phase.index()].H()
+                           + byDt(max(phase.residualAlpha() - alpha, scalar(0))
+                                  * phase.rho())
+                                 * phase.U()().oldTime());
 
                 if (HVms.set(movingPhasei))
                 {
@@ -196,19 +179,15 @@ void Foam::solvers::OpenPDAC::cellPressureCorrector()
             constrainHbyA(HbyADs[movingPhasei], phase.U(), p_rgh);
         }
 
-        const surfaceScalarField mSfGradp(-mesh.magSf()*fvc::snGrad(p_rgh));
+        const surfaceScalarField mSfGradp(-mesh.magSf() * fvc::snGrad(p_rgh));
 
         forAll(movingPhases, movingPhasei)
         {
             phaseModel& phase = movingPhases_[movingPhasei];
 
-            phase.URef() =
-                HbyADs[movingPhasei]
-              + fvc::reconstruct
-                (
-                    alphaByADfs[movingPhasei]*mSfGradp
-                  - FgByADfs[movingPhasei]
-                );
+            phase.URef() = HbyADs[movingPhasei]
+                         + fvc::reconstruct(alphaByADfs[movingPhasei] * mSfGradp
+                                            - FgByADfs[movingPhasei]);
 
             phase.URef().correctBoundaryConditions();
             fvConstraints().constrain(phase.URef());
@@ -216,8 +195,8 @@ void Foam::solvers::OpenPDAC::cellPressureCorrector()
     }
 
     bool checkInnerResidual(false);
-    scalar r0(0.0);        
-    scalar r0Inner(0.0);        
+    scalar r0(0.0);
+    scalar r0Inner(0.0);
     // --- Pressure corrector loop
     while (pimple.correct())
     {
@@ -232,38 +211,28 @@ void Foam::solvers::OpenPDAC::cellPressureCorrector()
             PtrList<surfaceScalarField> phiHs(movingPhases.size());
 
             // Correction force fluxes
-            PtrList<surfaceScalarField> ddtCorrs
-            (
-                momentumTransferSystem_.ddtCorrs()
-            );
+            PtrList<surfaceScalarField> ddtCorrs(
+                momentumTransferSystem_.ddtCorrs());
 
             forAll(movingPhases, movingPhasei)
             {
                 const phaseModel& phase = movingPhases[movingPhasei];
                 const volScalarField& alpha = phase;
 
-                Hs.set
-                (
-                    movingPhasei,
-                    UEqns[phase.index()].H()
-                  + byDt
-                    (
-                        max(phase.residualAlpha() - alpha, scalar(0))
-                       *phase.rho()
-                    )
-                   *phase.U()().oldTime()
-                );
+                Hs.set(movingPhasei,
+                       UEqns[phase.index()].H()
+                           + byDt(max(phase.residualAlpha() - alpha, scalar(0))
+                                  * phase.rho())
+                                 * phase.U()().oldTime());
 
                 if (HVms.set(movingPhasei))
                 {
                     Hs[movingPhasei] += HVms[movingPhasei];
                 }
 
-                phiHs.set
-                (
-                    movingPhasei,
-                    fvc::flux(Hs[movingPhasei]) + ddtCorrs[phase.index()]
-                );
+                phiHs.set(movingPhasei,
+                          fvc::flux(Hs[movingPhasei])
+                              + ddtCorrs[phase.index()]);
             }
 
             HbyADs = invADVs & Hs;
@@ -281,73 +250,50 @@ void Foam::solvers::OpenPDAC::cellPressureCorrector()
         }
 
         // Total predicted flux
-        surfaceScalarField phiHbyA
-        (
-            IOobject
-            (
-                "phiHbyA",
-                runTime.name(),
-                mesh
-            ),
-            mesh,
-            dimensionedScalar(dimVolumetricFlux, 0)
-        );
+        surfaceScalarField phiHbyA(IOobject("phiHbyA", runTime.name(), mesh),
+                                   mesh,
+                                   dimensionedScalar(dimVolumetricFlux, 0));
 
         forAll(movingPhases, movingPhasei)
         {
             const phaseModel& phase = movingPhases[movingPhasei];
 
-            phiHbyA += alphafs[phase.index()]*phiHbyADs[movingPhasei];
+            phiHbyA += alphafs[phase.index()] * phiHbyADs[movingPhasei];
         }
 
         MRF.makeRelative(phiHbyA);
         fvc::makeRelative(phiHbyA, movingPhases[0].U());
 
         // Pressure "diffusivity"
-        surfaceScalarField rAf
-        (
-            IOobject
-            (
-                "rAf",
-                runTime.name(),
-                mesh
-            ),
-            mesh,
-            dimensionedScalar(dimTime/dimDensity, 0)
-        );
+        surfaceScalarField rAf(IOobject("rAf", runTime.name(), mesh),
+                               mesh,
+                               dimensionedScalar(dimTime / dimDensity, 0));
 
         forAll(movingPhases, movingPhasei)
         {
             const phaseModel& phase = movingPhases[movingPhasei];
 
-            rAf += alphafs[phase.index()]*alphaByADfs[movingPhasei];
+            rAf += alphafs[phase.index()] * alphaByADfs[movingPhasei];
         }
 
         // Update the fixedFluxPressure BCs to ensure flux consistency
         {
-            surfaceScalarField::Boundary phib
-            (
-                surfaceScalarField::Internal::null(),
-                phi.boundaryField()
-            );
+            surfaceScalarField::Boundary phib(
+                surfaceScalarField::Internal::null(), phi.boundaryField());
             phib = 0;
 
             forAll(movingPhases, movingPhasei)
             {
                 phaseModel& phase = movingPhases_[movingPhasei];
 
-                phib +=
-                    alphafs[phase.index()].boundaryField()
-                   *phase.phi()().boundaryField();
+                phib += alphafs[phase.index()].boundaryField()
+                      * phase.phi()().boundaryField();
             }
 
-            setSnGrad<fixedFluxPressureFvPatchScalarField>
-            (
+            setSnGrad<fixedFluxPressureFvPatchScalarField>(
                 p_rgh.boundaryFieldRef(),
-                (
-                    phiHbyA.boundaryField() - phib
-                )/(mesh.magSf().boundaryField()*rAf.boundaryField())
-            );
+                (phiHbyA.boundaryField() - phib)
+                    / (mesh.magSf().boundaryField() * rAf.boundaryField()));
         }
 
         // Compressible pressure equations
@@ -363,40 +309,30 @@ void Foam::solvers::OpenPDAC::cellPressureCorrector()
 
             // Update the fixedFluxPressure BCs to ensure flux consistency
             {
-                surfaceScalarField::Boundary phib
-                (
-                    surfaceScalarField::Internal::null(),
-                    phi.boundaryField()
-                );
+                surfaceScalarField::Boundary phib(
+                    surfaceScalarField::Internal::null(), phi.boundaryField());
                 phib = 0;
 
                 forAll(movingPhases, movingPhasei)
                 {
                     phaseModel& phase = movingPhases_[movingPhasei];
 
-                    phib +=
-                        alphafs[phase.index()].boundaryField()
-                       *phase.phi()().boundaryField();
+                    phib += alphafs[phase.index()].boundaryField()
+                          * phase.phi()().boundaryField();
                 }
 
-                setSnGrad<fixedFluxPressureFvPatchScalarField>
-                (
+                setSnGrad<fixedFluxPressureFvPatchScalarField>(
                     p_rgh.boundaryFieldRef(),
-                    (
-                        phiHbyA.boundaryField() - phib
-                    )/(mesh.magSf().boundaryField()*rAf.boundaryField())
-                );
+                    (phiHbyA.boundaryField() - phib)
+                        / (mesh.magSf().boundaryField() * rAf.boundaryField()));
             }
 
             // Construct the transport part of the pressure equation
-            fvScalarMatrix pEqnIncomp
-            (
-                fvc::div(phiHbyA)
-              - fvm::laplacian(rAf, p_rgh)
-            );
+            fvScalarMatrix pEqnIncomp(fvc::div(phiHbyA)
+                                      - fvm::laplacian(rAf, p_rgh));
 
             if ((!checkResidual) && (!checkInnerResidual))
-            { 
+            {
                 // Solve
                 {
                     fvScalarMatrix pEqn(pEqnIncomp);
@@ -408,49 +344,48 @@ void Foam::solvers::OpenPDAC::cellPressureCorrector()
 
                     if (fluid.incompressible())
                     {
-                        pEqn.setReference
-                        (
-                            pressureReference.refCell(),
-                            pressureReference.refValue()
-                        );
+                        pEqn.setReference(pressureReference.refCell(),
+                                          pressureReference.refValue());
                     }
 
                     fvConstraints().constrain(pEqn);
 
                     pEqn.solve();
-                                  
-                    const DynamicList<SolverPerformance<scalar>> sp
-                    (
-                        Residuals<scalar>::field(mesh, "p_rgh")
-                    );
+
+                    const DynamicList<SolverPerformance<scalar>> sp(
+                        Residuals<scalar>::field(mesh, "p_rgh"));
 
                     label n = sp.size();
-                    r0 = cmptMax(sp[n-1].initialResidual());
-                    
-                    if (pimple.firstNonOrthogonalIter() && pimple.firstPisoIter() && !pimple.finalIter())
+                    r0 = cmptMax(sp[n - 1].initialResidual());
+
+                    if (pimple.firstNonOrthogonalIter()
+                        && pimple.firstPisoIter() && !pimple.finalIter())
                     {
                         Info << "PIMPLE iter: " << pimpleIter
                              << ", Initial p_rgh residual: " << r0 << endl;
 
-                        // Resetta lo stato alla prima iterazione PIMPLE (corr=1)
+                        // Resetta lo stato alla prima iterazione PIMPLE
+                        // (corr=1)
                         if (pimpleIter == 1)
                         {
-                           prevPimpleInitialResidual_ = r0;
+                            prevPimpleInitialResidual_ = r0;
                         }
-                        // Applica la logica di controllo nelle iterazioni successive
-                        else if (
-                            pimpleIter > pimple.nCorr()/2
-                         && !pimple.finalIter()
-                        )
+                        // Applica la logica di controllo nelle iterazioni
+                        // successive
+                        else if (pimpleIter > pimple.nCorr() / 2
+                                 && !pimple.finalIter())
                         {
-                            Info << "residual ratio " << r0/prevPimpleInitialResidual_ << endl;
+                            Info << "residual ratio "
+                                 << r0 / prevPimpleInitialResidual_ << endl;
                             // Se il residuo non è diminuito, imposta il flag
                             if (r0 > prevPimpleInitialResidual_ * residualRatio)
                             {
                                 if (ratioFirstCheck)
                                 {
-                                    Info << "  --> PIMPLE: Initial residual increased. "
-                                         << "Scheduling jump to final iter." << endl;
+                                    Info << "  --> PIMPLE: Initial residual "
+                                            "increased. "
+                                         << "Scheduling jump to final iter."
+                                         << endl;
                                     forceFinalPimpleIter_ = true;
                                 }
                                 else
@@ -467,42 +402,42 @@ void Foam::solvers::OpenPDAC::cellPressureCorrector()
                         }
                         else
                         {
-                            // Aggiorna comunque il residuo per le iterazioni iniziali
+                            // Aggiorna comunque il residuo per le iterazioni
+                            // iniziali
                             prevPimpleInitialResidual_ = r0;
                         }
                     }
-                    
+
                     // Info << " p_rgh initial residual " << r0 << endl;
                     // Info << checkResidual << endl;
-                    if ( r0 <= nonOrthogonalResidual ) 
+                    if (r0 <= nonOrthogonalResidual)
                     {
                         checkResidual = true;
-                        Info << "NonOrthogonal convergence "
-                             << checkResidual << endl;
-                    
-                    }   
-                } 
+                        Info << "NonOrthogonal convergence " << checkResidual
+                             << endl;
+                    }
+                }
             }
 
             if (pimple.firstNonOrthogonalIter())
             {
                 r0Inner = r0;
             }
-            
+
             // Correct fluxes and velocities on last non-orthogonal iteration
             if (pimple.finalNonOrthogonalIter())
             {
                 phi_ = phiHbyA + pEqnIncomp.flux();
 
-                surfaceScalarField mSfGradp("mSfGradp", pEqnIncomp.flux()/rAf);
+                surfaceScalarField mSfGradp("mSfGradp",
+                                            pEqnIncomp.flux() / rAf);
 
                 forAll(movingPhases, movingPhasei)
                 {
                     phaseModel& phase = movingPhases_[movingPhasei];
 
-                    phase.phiRef() =
-                        phiHbyADs[movingPhasei]
-                      + alphaByADfs[movingPhasei]*mSfGradp;
+                    phase.phiRef() = phiHbyADs[movingPhasei]
+                                   + alphaByADfs[movingPhasei] * mSfGradp;
 
                     // Set the phase dilatation rate
                     phase.divU(-pEqnComps[phase.index()] & p_rgh);
@@ -514,7 +449,7 @@ void Foam::solvers::OpenPDAC::cellPressureCorrector()
                 // Optionally relax pressure for velocity correction
                 p_rgh.relax();
 
-                mSfGradp = pEqnIncomp.flux()/rAf;
+                mSfGradp = pEqnIncomp.flux() / rAf;
 
                 if (dragCorrection)
                 {
@@ -522,29 +457,21 @@ void Foam::solvers::OpenPDAC::cellPressureCorrector()
                     PtrList<surfaceScalarField> dragCorrfs(movingPhases.size());
                     momentumTransferSystem_.dragCorrs(dragCorrs, dragCorrfs);
 
-                    PtrList<volVectorField> dragCorrByADs
-                    (
-                        invADVs & dragCorrs
-                    );
+                    PtrList<volVectorField> dragCorrByADs(invADVs & dragCorrs);
 
-                    PtrList<surfaceScalarField> dragCorrByADfs
-                    (
-                        invADVfs & dragCorrfs
-                    );
+                    PtrList<surfaceScalarField> dragCorrByADfs(invADVfs
+                                                               & dragCorrfs);
 
                     forAll(movingPhases, movingPhasei)
                     {
                         phaseModel& phase = movingPhases_[movingPhasei];
 
-                        phase.URef() =
-                            HbyADs[movingPhasei]
-                          + fvc::reconstruct
-                            (
-                                alphaByADfs[movingPhasei]*mSfGradp
-                              - FgByADfs[movingPhasei]
-                              + dragCorrByADfs[movingPhasei]
-                            )
-                          - dragCorrByADs[movingPhasei];
+                        phase.URef() = HbyADs[movingPhasei]
+                                     + fvc::reconstruct(
+                                           alphaByADfs[movingPhasei] * mSfGradp
+                                           - FgByADfs[movingPhasei]
+                                           + dragCorrByADfs[movingPhasei])
+                                     - dragCorrByADs[movingPhasei];
                     }
                 }
                 else
@@ -553,13 +480,10 @@ void Foam::solvers::OpenPDAC::cellPressureCorrector()
                     {
                         phaseModel& phase = movingPhases_[movingPhasei];
 
-                        phase.URef() =
-                            HbyADs[movingPhasei]
-                          + fvc::reconstruct
-                            (
-                                alphaByADfs[movingPhasei]*mSfGradp
-                              - FgByADfs[movingPhasei]
-                            );
+                        phase.URef() = HbyADs[movingPhasei]
+                                     + fvc::reconstruct(
+                                           alphaByADfs[movingPhasei] * mSfGradp
+                                           - FgByADfs[movingPhasei]);
                     }
                 }
 
@@ -573,59 +497,60 @@ void Foam::solvers::OpenPDAC::cellPressureCorrector()
             }
         }
 
-	if ( !checkInnerResidual )
-        { 
+        if (!checkInnerResidual)
+        {
             // Update and limit the static pressure
-            p_ = p_rgh + rho*buoyancy.gh;
+            p_ = p_rgh + rho * buoyancy.gh;
             // p_ = p_rgh + rho*buoyancy.gh + buoyancy.pRef;
             fvConstraints().constrain(p_);
 
             // Account for static pressure reference
             if (p_rgh.needReference() && fluid.incompressible())
             {
-                p += dimensionedScalar
-                (
+                p += dimensionedScalar(
                     "p",
                     p.dimensions(),
                     pressureReference.refValue()
-                  - getRefCellValue(p, pressureReference.refCell())
-                );
+                        - getRefCellValue(p, pressureReference.refCell()));
             }
 
-            Info<< "p, min, max = " << min(p).value() << " " << max(p).value() << endl;
+            Info << "p, min, max = " << min(p).value() << " " << max(p).value()
+                 << endl;
 
             if (lowPressureTimestepCorrection)
             {
-                p_ratio = max(0.01,min(p).value() /p.weightedAverage(mesh_.V()).value());
-                Info<< "p_ratio = " << p_ratio << endl;
+                p_ratio =
+                    max(0.01,
+                        min(p).value() / p.weightedAverage(mesh_.V()).value());
+                Info << "p_ratio = " << p_ratio << endl;
             }
-        
-        // Limit p_rgh
-        p_rgh = p - rho*buoyancy.gh;
-        // p_rgh = p - rho*buoyancy.gh - buoyancy.pRef;
 
-        // Update densities from change in p_rgh
-        forAll(phases, phasei)
-        {
-            phaseModel& phase = phases_[phasei];
-            if (!phase.incompressible())
+            // Limit p_rgh
+            p_rgh = p - rho * buoyancy.gh;
+            // p_rgh = p - rho*buoyancy.gh - buoyancy.pRef;
+
+            // Update densities from change in p_rgh
+            forAll(phases, phasei)
             {
-                phase.rho() += phase.fluidThermo().psi()*(p_rgh - p_rgh_0);
+                phaseModel& phase = phases_[phasei];
+                if (!phase.incompressible())
+                {
+                    phase.rho() +=
+                        phase.fluidThermo().psi() * (p_rgh - p_rgh_0);
+                }
             }
-        }
 
             // Correct p_rgh for consistency with p and the updated densities
             rho = fluid.rho();
-            p_rgh = p - rho*buoyancy.gh;
+            p_rgh = p - rho * buoyancy.gh;
             // p_rgh = p - rho*buoyancy.gh - buoyancy.pRef;
         }
 
-        if ( ( r0Inner <= innerResidual ) && ( !checkInnerResidual ) ) 
+        if ((r0Inner <= innerResidual) && (!checkInnerResidual))
         {
             checkInnerResidual = true;
-            Info << "Innerloop convergence "
-            << checkInnerResidual << endl;
-        } 
+            Info << "Innerloop convergence " << checkInnerResidual << endl;
+        }
     }
 
     UEqns.clear();

@@ -20,9 +20,7 @@ LIB_LIBS = \
     -llagrangian \
     -lOpenPDAClagrangianParcel \
     -lfluidSolver \
-    -lOpenPDACpopulationBalance \
     -lOpenPDACMomentumTransportModels \
     -lOpenPDACThermophysicalTransportModels \
-    -lOpenPDACReactions \
     -lfvModels \
     -lfvConstraints
