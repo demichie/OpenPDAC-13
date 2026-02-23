@@ -50,7 +50,7 @@ Foam::dragModels::solidSolidDrag::KSolidSolid
  const phaseModel& solid2
  ) const
 {
- if (PPdrag_ == "SinclairJackson")
+ if (PPdragRadialModel_ == "SinclairJackson")
     {
       const phaseSystem& fluid = gas.fluid();
       const volScalarField& alphag = gas;
@@ -95,7 +95,7 @@ Foam::dragModels::solidSolidDrag::KSolidSolid
       return ( fractNum / fractDen );
     }
 
-  else if (PPdrag_ == "Lebowitz")
+  else if (PPdragRadialModel_ == "Lebowitz")
     {
       const phaseSystem& fluid = gas.fluid();
       const volScalarField& alphag = gas;
@@ -135,7 +135,7 @@ Foam::dragModels::solidSolidDrag::KSolidSolid
       return ( fractNum / fractDen );
     }
 
-  else if (PPdrag_ == "CarnahanStarling")
+  else if (PPdragRadialModel_ == "CarnahanStarling")
     {
       const phaseSystem& fluid = gas.fluid();
       const volScalarField& alphag = gas;
@@ -188,8 +188,8 @@ Foam::dragModels::solidSolidDrag::KSolidSolid
 
       FatalErrorInFunction
 	<< "The 'else' block was executed in solidSolidDrag.C since no valid model was found." << nl
-	<< "PPdrag was set to: " << nl
-	<< PPdrag_ << nl
+	<< "PPdragRadialModel was set to: " << nl
+	<< PPdragRadialModel_ << nl
 	<< "" << nl
 	<< "Available options are:" << nl
 	<< "" << nl
@@ -218,7 +218,7 @@ Foam::dragModels::solidSolidDrag::solidSolidDrag
     gasName_(dict.lookup("gas")),
     solid1Name_(dict.lookup("solid1")),
     solid2Name_(dict.lookup("solid2")),
-    PPdrag_(dict.lookup("PPdrag")),
+    PPdragRadialModel_(dict.lookup("PPdragRadialModel")),
     E_("E", dimless, dict),
     Cf_("Cf", dimless, dict)
 {}

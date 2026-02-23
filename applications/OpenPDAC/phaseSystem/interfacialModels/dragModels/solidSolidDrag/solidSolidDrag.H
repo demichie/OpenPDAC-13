@@ -70,8 +70,8 @@ class solidSolidDrag
         const word solid2Name_;
 
         //- RadialModel Flag                                                            
-        //const dimensionedScalar PPdrag_;                                              
-        const word PPdrag_;
+        //const dimensionedScalar PPdragRadialModel_;                                              
+        const word PPdragRadialModel_;
 
         //- Coefficient of restitution
         const dimensionedScalar E_;

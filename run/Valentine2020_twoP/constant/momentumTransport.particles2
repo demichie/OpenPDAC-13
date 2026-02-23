@@ -37,7 +37,7 @@ RAS
         granularConductivityModel   Gidaspow;
         granularPressureModel       Lun;
         frictionalStressModel       JohnsonJacksonSchaeffer;
-        radialModel                 SinclairJackson;
+        radialModel                 CarnahanStarling;
 
         JohnsonJacksonSchaefferCoeffs
         {

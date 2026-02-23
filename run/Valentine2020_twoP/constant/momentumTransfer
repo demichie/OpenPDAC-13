@@ -33,7 +33,7 @@ drag
         solid1          particles1;
         solid2          particles2;
 	
-	PPdrag          carnahanStarling;
+	PPdragRadialModel          CarnahanStarling;
 
 	E               0.5;
         Cf              1.0;
