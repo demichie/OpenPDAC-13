@@ -143,19 +143,33 @@ void Foam::solvers::OpenPDAC::energyPredictor()
 
 void Foam::solvers::OpenPDAC::thermophysicalPredictor()
 {
-
+    // Bypass logic for "ghost" iterations in the PIMPLE loop
     if (forceFinalPimpleIter_ && !pimple.finalIter())
     {
-        return; // Non fare nulla in questa iterazione
+        return; 
     }
 
-    for (int Ecorr=0; Ecorr<nEnergyCorrectors; Ecorr++)
-    {
+    // Dynamic number of correctors: fewer at start, more at the end
+    int dynamicMaxCorrectors = min(nMaxEnergyCorrectors, nEnergyCorrectors + pimpleIter);
 
-        const word&continuousPhaseName_ = fluid.continuousPhaseName();
+    if (pimple.finalIter())
+    {
+        dynamicMaxCorrectors = nMaxEnergyCorrectors;
+    }
+
+    // Store residual from previous iteration
+    autoPtr<volScalarField> heDisplPrev;
+
+    const word& continuousPhaseName_ = fluid.continuousPhaseName();
+    
+    for (int Ecorr=0; Ecorr<dynamicMaxCorrectors; Ecorr++)
+    {
         const phaseModel& continuousPhase = fluid.phases()[continuousPhaseName_];
 
+        // Store the starting enthalpy of the continuous phase (h_k)
+        volScalarField heStart(continuousPhase.thermo().he());
 
+        // Pre-corrections for dispersed phases (e.g., temperature clipping)
         forAll(fluid.thermalPhases(), thermalPhasei)
         {
             const phaseModel& phase = fluid.thermalPhases()[thermalPhasei];
@@ -163,12 +177,10 @@ void Foam::solvers::OpenPDAC::thermophysicalPredictor()
             if ( (&phase != &continuousPhase) && correctTdispersed )
             {
                 volScalarField& heNew = const_cast<volScalarField&>(phase.thermo().he());
-                volScalarField heTcont = phase.thermo().he(p_,continuousPhase.thermo().T());
+                volScalarField heTcont = phase.thermo().he(p_, continuousPhase.thermo().T());
                         
                 heNew = pos(heNew)*heNew 
                         + neg0(heNew)*heTcont;
-
-                // volScalarField he1 = phase.thermo().he(p_,phase.thermo().T());
                         
                 heNew = pos0(phase-phase.residualAlpha())*heNew 
                         + neg(phase-phase.residualAlpha())*heTcont;
@@ -177,12 +189,75 @@ void Foam::solvers::OpenPDAC::thermophysicalPredictor()
             }
         }
 
+        // Standard OpenFOAM predictor sequence
         fluid_.correctThermo();
-
         fluid_.predictThermophysicalTransport();
         compositionPredictor();
-        energyPredictor();
+        
+        // Solve the linear system. OpenFOAM prints "Linear Residuals" here.
+        energyPredictor(); 
 
+        // ======================================================
+        // AITKEN ACCELERATION (Continuous Phase Only)
+        // Applied to the Displacement Vector (Delta h)
+        // ======================================================
+
+        if (useAitkenRelaxation_) 
+        {
+            // 'he' is the tentative value predicted by Picard (tilde_h_{k+1})
+            volScalarField& he =
+                const_cast<volScalarField&>(continuousPhase.thermo().he());
+
+            // Calculate current DISPLACEMENT: Delta_h_k = tilde_h_{k+1} - h_k
+            volScalarField heDisplCurr = he - heStart;
+
+            // Apply relaxation only if history exists (from 2nd iteration onwards)
+            if (Ecorr > 0 && heDisplPrev.valid())
+            {
+                // Calculate the change in displacement: delta = Delta_h_k - Delta_h_{k-1}
+                volScalarField deltaDispl = heDisplCurr - heDisplPrev();
+
+                // Compute scalar products using primitiveField() to avoid dimension checks
+                scalar num = gSumProd(heDisplCurr.primitiveField(), deltaDispl.primitiveField());
+                scalar den = gSumSqr(deltaDispl.primitiveField());
+
+                if (den > SMALL)
+                {
+                    scalar omega = 1.0 - (num / den);
+
+                    // Stable clamp for stiff thermodynamic systems
+                    omega = max(0.2, min(omega, 1.2));
+
+                    Info<< "  Continuous Aitken omega: " << omega << endl;
+
+                    // Final Update: h_{k+1} = h_k + omega * Delta_h_k
+                    he = heStart + omega * heDisplCurr;
+                }
+            }
+
+            // Update displacement history for the next iteration
+            if (!heDisplPrev.valid())
+            {
+                heDisplPrev.reset(new volScalarField(heDisplCurr));
+            }
+            else
+            {
+                heDisplPrev() = heDisplCurr;
+            }
+            
+            // Ensure boundary conditions are correct for the history field
+            heDisplPrev().correctBoundaryConditions();
+
+            // Update thermodynamics with the accelerated field (if modified)
+            if (Ecorr > 0)
+            {
+                fluid_.correctThermo();
+            }
+        }
+
+        // ======================================================
+
+        // Report Min/Max Temperatures
         forAll(fluid.thermalPhases(), thermalPhasei)
         {
             const phaseModel& phase = fluid.thermalPhases()[thermalPhasei];
@@ -194,6 +269,7 @@ void Foam::solvers::OpenPDAC::thermophysicalPredictor()
                 << endl;
         }
             
+        // Check LINEAR RESIDUALS (r0) for Early Exit
         bool checkResidual(true);
         bool doCheck(false);
 
@@ -210,18 +286,22 @@ void Foam::solvers::OpenPDAC::thermophysicalPredictor()
                 
             scalar r0 = cmptMax(sp[n-1].initialResidual());
             Info << name << " initial residual " << r0 << endl;
+            
             if (energyControlDict.found(name))
             {
                 doCheck = true;
                 scalar residual(energyControlDict.lookup<scalar>(name));
-                checkResidual = checkResidual && ( r0 <= residual);;          
+                checkResidual = checkResidual && ( r0 <= residual);
             } 
         }
+        
         Info << "Iteration " 
              << Ecorr+1 
-             << " Check for intial Energy Residual " 
+             << " Check for initial Energy Residual " 
              << checkResidual 
              << endl;
+
+        // If linear residuals are small enough, break the inner loop
         if (doCheck) 
         {
             if ( checkResidual )
@@ -237,6 +317,4 @@ void Foam::solvers::OpenPDAC::thermophysicalPredictor()
         }            
     }
 }
-
-
 // ************************************************************************* //

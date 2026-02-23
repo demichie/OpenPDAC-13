@@ -123,6 +123,11 @@ protected:
         bool ratioFirstCheck;
         
         label pimpleIter;
+        
+        label nMaxEnergyCorrectors;
+        
+        //- Switch per attivare/disattivare il rilassamento di Aitken
+        Switch useAitkenRelaxation_;
 
     //- Optional LTS reciprocal time-step field
     tmp<volScalarField> trDeltaT;

@@ -83,6 +83,11 @@ bool Foam::solvers::OpenPDAC::read()
     residualRatio =     
         pimple.dict().lookupOrDefault<scalar>("residualRatio", 10.0);        
 
+    nMaxEnergyCorrectors =     
+        pimple.dict().lookupOrDefault<label>("nMaxEnergyCorrectors", 20);        
+
+    useAitkenRelaxation_ = 
+        pimple.dict().lookupOrDefault<Switch>("useAitkenRelaxation", false);
 
     if (pimple.dict().found("energyControl"))
             {
