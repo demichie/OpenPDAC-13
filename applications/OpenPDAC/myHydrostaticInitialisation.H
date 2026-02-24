@@ -6,20 +6,21 @@
      \\/     M anipulation  |
 -------------------------------------------------------------------------------
 License
-    This file is part of OpenFOAM.
+    This file is part of OpenPDAC.
+    This file was derived from the multiphaseEuler solver in OpenFOAM.
 
     OpenFOAM is free software: you can redistribute it and/or modify it
     under the terms of the GNU General Public License as published by
     the Free Software Foundation, either version 3 of the License, or
     (at your option) any later version.
 
-    OpenFOAM is distributed in the hope that it will be useful, but WITHOUT
-    ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-    FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
-    for more details.
+    This program is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+    Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with OpenFOAM.  If not, see <http://www.gnu.org/licenses/>.
+    You should have received a copy of the GNU General Public License along
+    with this program. If not, see <http://www.gnu.org/licenses/>.
 
 Class
     Foam::myHydrostaticInitialisation
@@ -52,20 +53,17 @@ SourceFiles
 
 namespace Foam
 {
-    class phaseSystem;
+class phaseSystem;
 
-    void hydrostaticInitialisation
-    (
-        volScalarField& p_rgh,
-        volScalarField& ph_rgh,
-        volScalarField& p,
-        const uniformDimensionedVectorField& g,
-        dimensionedScalar& hRef,
-        const volScalarField& gh,
-        const surfaceScalarField& ghf,
-        phaseSystem& fluid,
-        const dictionary& dict
-    );
+void hydrostaticInitialisation(volScalarField& p_rgh,
+                               volScalarField& ph_rgh,
+                               volScalarField& p,
+                               const uniformDimensionedVectorField& g,
+                               dimensionedScalar& hRef,
+                               const volScalarField& gh,
+                               const surfaceScalarField& ghf,
+                               phaseSystem& fluid,
+                               const dictionary& dict);
 }
 
 
