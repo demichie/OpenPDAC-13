@@ -206,6 +206,8 @@ Foam::solvers::OpenPDAC::OpenPDAC(fvMesh& mesh)
 
   MRF(fluid_.MRF()),
 
+  dmdts_(fluid_.phases().size()),
+
   fluid(fluid_), phases(phases_), movingPhases(movingPhases_),
   momentumTransfer(momentumTransferSystem_), heatTransfer(heatTransferSystem_),
   p(p_), p_rgh(p_rgh_), phi(phi_)
@@ -271,6 +273,20 @@ Foam::solvers::OpenPDAC::OpenPDAC(fvMesh& mesh)
     {
         phaseModel& phase = phases_[phasei];
         U += phase * phase.rho() * phase.U() / rho;
+    }
+
+    // Initialize dmdts
+    forAll(dmdts_, i)
+    {
+        dmdts_.set(i,
+                   new volScalarField::Internal(
+                       IOobject("dmdt",
+                                runTime.name(),
+                                mesh,
+                                IOobject::NO_READ,
+                                IOobject::NO_WRITE),
+                       mesh,
+                       dimensionedScalar(dimDensity / dimTime, 0)));
     }
 
     forAll(clouds, cI)
@@ -364,18 +380,13 @@ void Foam::solvers::OpenPDAC::prePredictor()
 
         fluid_.correct();
 
-        // Initialize dmdts with zeros (no mass transfer)
-        PtrList<volScalarField::Internal> dmdts(fluid.phases().size());
-        forAll(dmdts, i)
+        // Reset dmdts to zero
+        forAll(dmdts_, i)
         {
-            dmdts.set(i,
-                      new volScalarField::Internal(
-                          IOobject("dmdt", runTime.name(), mesh),
-                          mesh,
-                          dimensionedScalar(dimDensity / dimTime, 0)));
+            dmdts_[i] = dimensionedScalar(dimDensity / dimTime, 0);
         }
 
-        fluid_.correctContinuityError(dmdts);
+        fluid_.correctContinuityError(dmdts_);
     }
 }
 

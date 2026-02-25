@@ -197,6 +197,9 @@ protected:
     //  has the same divergence
     autoPtr<volScalarField> divU;
 
+    //- Mass transfer rates per phase
+    PtrList<volScalarField::Internal> dmdts_;
+
 
     // Convergence flag of energy equation
     bool convergenceFlag;

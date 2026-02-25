@@ -56,14 +56,7 @@ void Foam::hydrostaticInitialisation(volScalarField& p_rgh,
         volScalarField rho("rho", fluid.rho());
         volVectorField U("U", fluid.U());
 
-        dimensionedScalar xMin = min(mesh.Cf().component(0));
-        dimensionedScalar xMax = max(mesh.Cf().component(0));
-        dimensionedScalar yMin = min(mesh.Cf().component(1));
-        dimensionedScalar yMax = max(mesh.Cf().component(1));
-        dimensionedScalar zMin = min(mesh.Cf().component(2));
-        dimensionedScalar zMax = max(mesh.Cf().component(2));
-
-        dimensionedScalar hBdry = 0.0 * max(mesh.Cf().component(2));
+        dimensionedScalar hBdry("hBdry", dimLength, -VGREAT);
 
         word local_patchName = ""; // Use the name (word), not the label!
 
@@ -88,19 +81,17 @@ void Foam::hydrostaticInitialisation(volScalarField& p_rgh,
                         pBdry.value() = min(ph_p);
                         Sout << "pBdry " << pBdry.value() << endl;
 
-                        // Use simple max extent logic since gravity is
-                        // axis-aligned
                         if (g.component(0).value() != 0.0)
                         {
-                            hBdry = xMax;
+                            hBdry.value() = ph_p.patch().Cf()[0].component(0);
                         }
                         else if (g.component(1).value() != 0.0)
                         {
-                            hBdry = yMax;
+                            hBdry.value() = ph_p.patch().Cf()[0].component(1);
                         }
                         else
                         {
-                            hBdry = zMax;
+                            hBdry.value() = ph_p.patch().Cf()[0].component(2);
                         }
                     }
                 }
@@ -203,6 +194,8 @@ void Foam::hydrostaticInitialisation(volScalarField& p_rgh,
 
             for (label i = 0; i < nCorr; i++)
             {
+                volScalarField ph_rgh_old("ph_rgh_old", ph_rgh);
+
                 surfaceScalarField rhof("rhof", fvc::interpolate(rho));
 
                 surfaceScalarField phig(
@@ -220,8 +213,8 @@ void Foam::hydrostaticInitialisation(volScalarField& p_rgh,
                 fluid.correctThermo();
                 rho = fluid.rho();
 
-                Info << "Hydrostatic pressure variation "
-                     << (max(ph_rgh) - min(ph_rgh)).value() << endl;
+                Info << "Hydrostatic pressure convergence (max delta) "
+                     << max(mag(ph_rgh - ph_rgh_old)).value() << endl;
 
                 Info << "min p " << min(p).value() << " max p "
                      << max(p).value() << endl;
