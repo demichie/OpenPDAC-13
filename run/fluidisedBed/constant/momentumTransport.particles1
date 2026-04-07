@@ -29,7 +29,7 @@ RAS
         continuousPhase         air;
         equilibrium             off;
         
-        e                       0.8;
+        e                       0.97;
         residualAlpha           1e-9;
 
         granularViscosityModel      Gidaspow;
@@ -39,11 +39,11 @@ RAS
 
         JohnsonJacksonSchaefferCoeffs
         {
-            Fr                      0.1;
+            Fr                      0.5;
             eta                     2;
-            p                       2;
-            phi                     28.5;
-            alphaDeltaMin           5e-2;
+            p                       3;
+            phi                     28.0;
+            alphaDeltaMin           1e-2;
         }
     }
 

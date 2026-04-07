@@ -33,8 +33,8 @@ boundaryField
     }
     walls
     {
-        // type            JohnsonJacksonParticleSlip;
-        type            fixedValue;
+        type            JohnsonJacksonParticleSlip;
+        // type            fixedValue;
         specularityCoefficient 0.01;
         value           uniform (0 0 0);
     }

@@ -73,7 +73,7 @@ surfaceTension
 kineticProperties
 {
     radialModel         SinclairJackson;
-    alphaMinFriction    0.58;
+    alphaMinFriction    0.55;
     alphasThreshold     1e-3;
 }
 

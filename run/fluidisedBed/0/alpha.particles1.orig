@@ -19,16 +19,24 @@ internalField   uniform 0;
 
 boundaryField
 {
+/*
     inlet
-{
-    type  fixedValue;
-    value uniform 0;
-}
+    {
+        type            zeroGradient;
+    }
+*/
+    
+    inlet
+    {
+        type  fixedValue;
+        value uniform 0;
+    }
+    
     outlet
     {
         type            inletOutlet;
-        inletValue      uniform 0.0000000001;
-        value           uniform 0.0000000001;
+        inletValue      uniform 0;
+        value           uniform 0;
     }
 
     walls
