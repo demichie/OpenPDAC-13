@@ -18,12 +18,14 @@ drag
 {
     particles1_dispersedIn_air
     {
-        type            SyamlalOBrien;
+        // type            SyamlalOBrien;
+        type            GidaspowErgunWenYu;
         residualRe      1e-3;
     }
     particles2_dispersedIn_air
     {
-        type            SyamlalOBrien;
+        // type            SyamlalOBrien;
+        type            GidaspowErgunWenYu;
         residualRe      1e-3;
     }
     particles1_particles2    
@@ -32,7 +34,7 @@ drag
         gas             air;
         solid1          particles1;
         solid2          particles2;
-        E               0.5;
+        E               0.97;
         Cf              1.0;
     }    
 }

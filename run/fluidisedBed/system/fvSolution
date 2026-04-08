@@ -16,15 +16,16 @@ FoamFile
 
 solvers
 {
-    
+
+    /*    
     "alpha.*"
     {
         nCorrectors     3;
-        nSubCycles      3;
+        nSubCycles      5;
 
         MULES
         {
-            nIter           1;
+            nIter           3;
             globalBounds    yes;
         }
 
@@ -40,9 +41,10 @@ solvers
         maxIter         3;
         clip            no;
     }
+    */
     
 
-    /*
+    
     "alpha.*"
     {
         nAlphaCorr      1;
@@ -53,11 +55,12 @@ solvers
         implicitPhasePressure yes;
         solver          smoothSolver;
         smoother        symGaussSeidel;
-        tolerance       1e-10;
+        //tolerance       1e-10;
         relTol          0;
         minIter         1;
+        maxIter         3;
     }
-    */
+    
 
 
     p_rgh

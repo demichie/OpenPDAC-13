@@ -18,7 +18,7 @@ phases (particles1 particles2 air);
 
 continuousPhase air;
 
-// referencePhase air;
+referencePhase air;
 
 particles1
 {
@@ -55,7 +55,7 @@ air
 
     diameterModel none;
 
-    residualAlpha   0;
+    residualAlpha   1e-6;
 }
 
 blending
