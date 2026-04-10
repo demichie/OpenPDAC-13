@@ -29,8 +29,14 @@ boundaryField
     }
     outlet
     {
+        /*
         type            pressureInletOutletVelocity;
         phi             phi.particles1;
+        value           uniform (0 0 0);
+        */
+        type            JohnsonJacksonParticleSlip;
+        // type            fixedValue;        
+        specularityCoefficient 0.01;
         value           uniform (0 0 0);
     }
     walls
