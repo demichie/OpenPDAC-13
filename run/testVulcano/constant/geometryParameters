@@ -10,14 +10,11 @@ convertToMeters 1.0;
 r_crater_top 10; // Radius of crater top in meters
 r_crater_base 10; // Radius of conduit in meters
 h_crater 100; // Length of crater in meters
-//r_crater_top        10.0;     // Radius of crater top in meters
-//r_crater_base       10.0;     // Radius of conduit in meters
-//h_crater            100.0;    // Length of crater in meters
 dx_crater_base      0.0;
 dy_crater_base      0.0;
 
 // Conduit parameters
-h_conduit           0.0;      // Length of conduit in meters (0-> no conduit)
+h_conduit           100.0;      // Length of conduit in meters (0-> no conduit)
 r_conduit_base      10;    // Radius of the conduit base in meters
 dx_conduit_base     0.0;
 dy_conduit_base     0.0;
@@ -43,6 +40,9 @@ dz_ratio 1.2;    // vertical-size ratio between consecutive cells
 // Atmospheric layers parameters
 atmCells_aspect_ratio_bottom List<scalar> (1.0 1.0 1.0 1.0);
 atmCells_aspect_ratio_top   List<scalar> (2.0 2.0 2.0 1.0);
+
+// factor for inner region enlargment from bottom to top of each layer
+exp_fact          2.0;
 
 // Fixed parameters
 crater_top_z        0.0;      // position of the crater top
