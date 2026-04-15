@@ -92,17 +92,19 @@ jobs:
       - name: Rebuild with coverage instrumentation
         shell: bash
         run: |
-          bash -ic '
-            set -e
-            set +m
-            conda activate OpenPDACconda
-            source /opt/openfoam13/etc/bashrc
-            ./Allwclean
-            cd applications/OpenPDAC
-            ./Allwmake
-            cd ../utilities/topoGrid
-            wmake
-          '
+          set -euo pipefail
+
+          source "$HOME/miniconda/etc/profile.d/conda.sh"
+          conda activate OpenPDACconda
+          source /opt/openfoam13/etc/bashrc
+
+          ./Allwclean
+
+          cd applications/OpenPDAC
+          ./Allwmake
+
+          cd ../utilities/topoGrid
+          wmake
 
       - name: Run testVulcano coverage
         shell: bash
