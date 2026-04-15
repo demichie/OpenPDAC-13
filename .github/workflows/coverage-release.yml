@@ -89,22 +89,21 @@ jobs:
           LIB_LIBS += -fprofile-arcs -ftest-coverage\
           EXE_LIBS += -fprofile-arcs -ftest-coverage'
 
-      - name: Rebuild with coverage instrumentation
-        shell: bash
+      - name: Build with coverage instrumentation
         run: |
-          set -euo pipefail
-
-          source "$HOME/miniconda/etc/profile.d/conda.sh"
-          conda activate OpenPDACconda
-          source /opt/openfoam13/etc/bashrc
-
-          ./Allwclean
-
-          cd applications/OpenPDAC
-          ./Allwmake
-
-          cd ../utilities/topoGrid
-          wmake
+          bash -ic '
+            set +m
+            
+            conda activate OpenPDACconda
+            
+            source /opt/openfoam13/etc/bashrc
+            
+            echo "Compiling OpenPDAC solver..."
+            cd applications/OpenPDAC
+            ./Allwmake
+            cd ../../applications/utilities/topoGrid
+            wmake
+          '
 
       - name: Run testVulcano coverage
         shell: bash
