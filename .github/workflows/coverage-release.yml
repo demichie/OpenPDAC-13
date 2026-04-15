@@ -1,0 +1,156 @@
+name: Release Coverage Report
+
+on:
+  workflow_run:
+    workflows:
+      - Build and Test OpenPDAC-13
+    types:
+      - completed
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: release-coverage-pages
+  cancel-in-progress: false
+
+jobs:
+  build-coverage:
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate release tag format
+        id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+          REFNAME="${{ github.event.workflow_run.head_branch }}"
+          if echo "$REFNAME" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "is_release_tag=true" >> "$GITHUB_OUTPUT"
+            echo "version=$REFNAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_release_tag=false" >> "$GITHUB_OUTPUT"
+            echo "Ref '$REFNAME' is not a release tag like 1.2.0"
+          fi
+
+      - name: Stop if this is not a release tag
+        if: steps.check.outputs.is_release_tag != 'true'
+        shell: bash
+        run: |
+          echo "Skipping: workflow run is not from a release tag."
+          exit 0
+
+      - name: Checkout tested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Install system dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo sh -c "wget -O - https://dl.openfoam.org/gpg.key | apt-key add -"
+          sudo add-apt-repository http://dl.openfoam.org/ubuntu
+          sudo apt-get update
+          sudo apt-get -y install openfoam13 wget lcov
+
+      - name: Install Miniconda and create environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
+          bash miniconda.sh -b -p "$HOME/miniconda"
+          source "$HOME/miniconda/bin/activate"
+          conda init bash
+          conda env create -f environment.yml
+
+      - name: Inject coverage flags
+        shell: bash
+        run: |
+          set -euo pipefail
+          find . -name "options" -type f | xargs sed -i '$a \
+          EXE_INC += -O0 -fprofile-arcs -ftest-coverage\
+          LIB_LIBS += -fprofile-arcs -ftest-coverage\
+          EXE_LIBS += -fprofile-arcs -ftest-coverage'
+
+      - name: Rebuild with coverage instrumentation
+        shell: bash
+        run: |
+          bash -ic '
+            set -e
+            set +m
+            conda activate OpenPDACconda
+            source /opt/openfoam13/etc/bashrc
+            ./Allwclean
+            cd applications/OpenPDAC
+            ./Allwmake
+            cd ../utilities/topoGrid
+            wmake
+          '
+
+      - name: Run testVulcano coverage
+        shell: bash
+        run: |
+          bash -ic '
+            set -e
+            set +m
+            conda activate OpenPDACconda
+            source /opt/openfoam13/etc/bashrc
+            cd run/testVulcano
+            chmod +x ./run_coverage_testVulcano.sh
+            COVERAGE_ROOT=$(pwd)/coverage PROJECT_ROOT=$(cd ../.. && pwd) ./run_coverage_testVulcano.sh
+          '
+
+      - name: Prepare Pages content
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.check.outputs.version }}"
+          SRC="run/testVulcano/coverage/html"
+          PAGES_DIR="pages_site"
+
+          mkdir -p "$PAGES_DIR/$VERSION"
+          cp -r "$SRC"/. "$PAGES_DIR/$VERSION"/
+
+          cat > "$PAGES_DIR/index.html" <<EOF
+          <!doctype html>
+          <html>
+          <head><meta charset="utf-8"><title>OpenPDAC coverage</title></head>
+          <body>
+            <h1>OpenPDAC coverage reports</h1>
+            <p>Latest published release report:</p>
+            <ul>
+              <li><a href="./${VERSION}/index.html">${VERSION}</a></li>
+            </ul>
+          </body>
+          </html>
+          EOF
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-${{ steps.check.outputs.version }}
+          path: |
+            run/testVulcano/coverage/coverage_clean.info
+            run/testVulcano/coverage/html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages_site
+
+  deploy-pages:
+    needs: build-coverage
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
