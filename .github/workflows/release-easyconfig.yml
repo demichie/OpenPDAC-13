@@ -16,40 +16,55 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository at tested commit
+      - name: Validate tag-like version
+        id: check
+        run: |
+          REFNAME="${{ github.event.workflow_run.head_branch }}"
+          if echo "$REFNAME" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "is_tag=true" >> "$GITHUB_OUTPUT"
+            echo "version=$REFNAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "This successful workflow run was not triggered by a release tag: $REFNAME"
+            echo "is_tag=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stop if not a release tag
+        if: steps.check.outputs.is_tag != 'true'
+        run: exit 0
+
+      - name: Checkout tested commit
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
-      - name: Determine tag
-        id: tag
+      - name: Prepare filenames
+        id: meta
         run: |
-          TAG="${{ github.event.workflow_run.head_branch }}"
-          if [ -z "$TAG" ]; then
-            echo "No tag found in workflow_run.head_branch"
-            exit 1
-          fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          VERSION="${{ steps.check.outputs.version }}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "asset_name=OpenPDAC-${VERSION}-cpeGNU-24.03-OpenFOAM-13.eb" >> "$GITHUB_OUTPUT"
 
-      - name: Prepare EasyConfig file
+      - name: Generate EasyConfig
         run: |
           mkdir -p dist
-          TEMPLATE="packaging/easybuild/OpenPDAC.eb.in"
-          OUTFILE="dist/OpenPDAC-${{ steps.tag.outputs.version }}-cpeGNU-24.03-OpenFOAM-13.eb"
+          TEMPLATE="packaging/easybuild/OpenPDAC-LUMI.eb.in"
+          OUTFILE="dist/${{ steps.meta.outputs.asset_name }}"
 
           cp "$TEMPLATE" "$OUTFILE"
+          sed -i "s/@VERSION@/${{ steps.meta.outputs.version }}/g" "$OUTFILE"
 
-          sed -i "s/@VERSION@/${{ steps.tag.outputs.version }}/g" "$OUTFILE"
-          sed -i "s/@TAG@/${{ steps.tag.outputs.tag }}/g" "$OUTFILE"
-          sed -i "s/@DOWNLOAD_FILENAME@/${{ steps.tag.outputs.tag }}.tar.gz/g" "$OUTFILE"
+          echo "Generated file:"
+          sed -n '1,200p' "$OUTFILE"
 
-          echo "Generated $OUTFILE"
-          cat "$OUTFILE"
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: easyconfig-${{ steps.meta.outputs.version }}
+          path: dist/*.eb
 
       - name: Create or update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          files: dist/OpenPDAC-${{ steps.tag.outputs.version }}-cpeGNU-24.03-OpenFOAM-13.eb
+          tag_name: ${{ steps.meta.outputs.version }}
+          files: dist/${{ steps.meta.outputs.asset_name }}
           generate_release_notes: true
