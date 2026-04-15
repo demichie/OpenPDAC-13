@@ -6,6 +6,7 @@ on:
       - Build and Test OpenPDAC-13
     types:
       - completed
+  workflow_dispatch:
 
 permissions:
   contents: write
