@@ -1,0 +1,55 @@
+name: Publish EasyConfig Release Asset
+
+on:
+  workflow_run:
+    workflows: ["Build and Test OpenPDAC-13"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+jobs:
+  publish-easyconfig:
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository at tested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Determine tag
+        id: tag
+        run: |
+          TAG="${{ github.event.workflow_run.head_branch }}"
+          if [ -z "$TAG" ]; then
+            echo "No tag found in workflow_run.head_branch"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare EasyConfig file
+        run: |
+          mkdir -p dist
+          TEMPLATE="packaging/easybuild/OpenPDAC.eb.in"
+          OUTFILE="dist/OpenPDAC-${{ steps.tag.outputs.version }}-cpeGNU-24.03-OpenFOAM-13.eb"
+
+          cp "$TEMPLATE" "$OUTFILE"
+
+          sed -i "s/@VERSION@/${{ steps.tag.outputs.version }}/g" "$OUTFILE"
+          sed -i "s/@TAG@/${{ steps.tag.outputs.tag }}/g" "$OUTFILE"
+          sed -i "s/@DOWNLOAD_FILENAME@/${{ steps.tag.outputs.tag }}.tar.gz/g" "$OUTFILE"
+
+          echo "Generated $OUTFILE"
+          cat "$OUTFILE"
+
+      - name: Create or update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          files: dist/OpenPDAC-${{ steps.tag.outputs.version }}-cpeGNU-24.03-OpenFOAM-13.eb
+          generate_release_notes: true
