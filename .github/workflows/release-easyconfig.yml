@@ -2,8 +2,10 @@ name: Publish EasyConfig Release Asset
 
 on:
   workflow_run:
-    workflows: ["Build and Test OpenPDAC-13"]
-    types: [completed]
+    workflows:
+      - Build and Test OpenPDAC-13
+    types:
+      - completed
 
 permissions:
   contents: write
@@ -20,6 +22,8 @@ jobs:
         id: check
         shell: bash
         run: |
+          set -euo pipefail
+
           REFNAME="${{ github.event.workflow_run.head_branch }}"
 
           if echo "$REFNAME" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
@@ -35,7 +39,7 @@ jobs:
         if: steps.check.outputs.is_release_tag != 'true'
         shell: bash
         run: |
-          echo "Skipping: not a release tag run."
+          echo "Skipping: workflow run is not from a release tag."
           exit 0
 
       - name: Checkout tested commit
@@ -51,8 +55,8 @@ jobs:
           mkdir -p dist
 
           TEMPLATE="packaging/easybuild/OpenPDAC-LUMI.eb.in"
-          OUTFILE="dist/${{ steps.check.outputs.asset_name }}"
           VERSION="${{ steps.check.outputs.version }}"
+          OUTFILE="dist/${{ steps.check.outputs.asset_name }}"
 
           if [ ! -f "$TEMPLATE" ]; then
             echo "ERROR: template not found: $TEMPLATE"
