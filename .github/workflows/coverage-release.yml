@@ -6,10 +6,17 @@ on:
       - Build and Test OpenPDAC-13
     types:
       - completed
+
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to analyze (release tag like 1.2.0, or a branch name)"
+        required: true
+        default: "main"
+        type: string
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
@@ -20,36 +27,39 @@ concurrency:
 jobs:
   build-coverage:
     if: >
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push'
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push') ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Validate release tag format
+      - name: Determine target ref and version
         id: check
         shell: bash
         run: |
           set -euo pipefail
-          REFNAME="${{ github.event.workflow_run.head_branch }}"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            REFNAME="${{ inputs.ref }}"
+          else
+            REFNAME="${{ github.event.workflow_run.head_branch }}"
+          fi
+
+          echo "refname=$REFNAME" >> "$GITHUB_OUTPUT"
+
           if echo "$REFNAME" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "is_release_tag=true" >> "$GITHUB_OUTPUT"
             echo "version=$REFNAME" >> "$GITHUB_OUTPUT"
           else
             echo "is_release_tag=false" >> "$GITHUB_OUTPUT"
-            echo "Ref '$REFNAME' is not a release tag like 1.2.0"
+            echo "version=$REFNAME" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Stop if this is not a release tag
-        if: steps.check.outputs.is_release_tag != 'true'
-        shell: bash
-        run: |
-          echo "Skipping: workflow run is not from a release tag."
-          exit 0
-
-      - name: Checkout tested commit
+      - name: Checkout target ref
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ steps.check.outputs.refname }}
 
       - name: Install system dependencies
         shell: bash
@@ -124,7 +134,7 @@ jobs:
           <head><meta charset="utf-8"><title>OpenPDAC coverage</title></head>
           <body>
             <h1>OpenPDAC coverage reports</h1>
-            <p>Latest published release report:</p>
+            <p>Latest generated report:</p>
             <ul>
               <li><a href="./${VERSION}/index.html">${VERSION}</a></li>
             </ul>
@@ -139,6 +149,7 @@ jobs:
           path: |
             run/testVulcano/coverage/coverage_clean.info
             run/testVulcano/coverage/html
+          if-no-files-found: error
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
