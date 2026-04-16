@@ -3,40 +3,91 @@ set -e
 
 # =============================================================================
 # Coverage run for OpenPDAC-13/run/testVulcano
+# -----------------------------------------------------------------------------
+# Purpose
+#   This script runs a coverage-oriented version of the testVulcano case for
+#   OpenPDAC. It is intended for CI and release-quality assessment workflows.
 #
-# This script:
-#   1. runs meshing
-#   2. runs field initialization (first foamRun)
-#   3. captures coverage for the initialization run
-#   4. zeros coverage counters
-#   5. runs a shortened simulation using controlDict.coverage (second foamRun)
-#   6. captures coverage for the simulation run
-#   7. merges the two tracefiles and generates an HTML report
+# What it does
+#   1. Runs meshing
+#   2. Captures a baseline coverage trace
+#   3. Runs field initialization (first foamRun)
+#   4. Checks whether .gcda files were generated
+#   5. Captures coverage for the initialization run
+#   6. Resets coverage counters
+#   7. Runs a shortened simulation using controlDict.coverage (second foamRun)
+#   8. Checks whether .gcda files were generated
+#   9. Captures coverage for the simulation run
+#  10. Merges the tracefiles, filters external code, and generates HTML
 #
-# It intentionally skips post-processing.
+# Notes
+#   - Post-processing is intentionally skipped.
+#   - Coverage capture is focused on applications/OpenPDAC, because this is the
+#     location where OpenPDAC coverage files were observed locally.
 # =============================================================================
 
 cd "${0%/*}" || exit 1
 
 COVERAGE_ROOT="${COVERAGE_ROOT:-$(pwd)/coverage}"
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd ../.. && pwd)}"
+COVERAGE_DIR="${COVERAGE_DIR:-$PROJECT_ROOT/applications/OpenPDAC}"
 
 mkdir -p "$COVERAGE_ROOT"
 
-echo "==> Project root: $PROJECT_ROOT"
-echo "==> Coverage output: $COVERAGE_ROOT"
+echo "==> Project root:   $PROJECT_ROOT"
+echo "==> Coverage root:  $COVERAGE_ROOT"
+echo "==> Coverage dir:   $COVERAGE_DIR"
 
 # -----------------------------------------------------------------------------
-# Helper: activate conda if available
+# Helper: print coverage debug information
 # -----------------------------------------------------------------------------
-if command -v conda >/dev/null 2>&1; then
-    # shellcheck disable=SC1091
-    . "$(conda info --base)/etc/profile.d/conda.sh"
-    conda activate OpenPDACconda || true
-fi
+print_coverage_debug() {
+    local label="$1"
+
+    echo "============================================================"
+    echo "Coverage debug: $label"
+    echo "Target coverage directory: $COVERAGE_DIR"
+    echo "------------------------------------------------------------"
+
+    echo "[gcno] First matches:"
+    find "$COVERAGE_DIR" -name "*.gcno" | head -50 || true
+    echo "[gcno] Count:"
+    find "$COVERAGE_DIR" -name "*.gcno" | wc -l || true
+
+    echo "------------------------------------------------------------"
+    echo "[gcda] First matches:"
+    find "$COVERAGE_DIR" -name "*.gcda" | head -50 || true
+    echo "[gcda] Count:"
+    find "$COVERAGE_DIR" -name "*.gcda" | wc -l || true
+
+    echo "============================================================"
+}
 
 # -----------------------------------------------------------------------------
-# Step 0: meshing
+# Optional helper: fail clearly if no gcda files are present
+# -----------------------------------------------------------------------------
+require_gcda_files() {
+    local label="$1"
+    local count
+
+    count=$(find "$COVERAGE_DIR" -name "*.gcda" | wc -l)
+
+    if [ "$count" -eq 0 ]; then
+        echo "ERROR: No .gcda files found in $COVERAGE_DIR after $label"
+        echo "This usually means that either:"
+        echo "  - coverage instrumentation was not applied correctly, or"
+        echo "  - the executed code did not produce runtime coverage files here."
+        exit 1
+    fi
+}
+
+# -----------------------------------------------------------------------------
+# Step 0: show initial debug state
+# -----------------------------------------------------------------------------
+print_coverage_debug "before meshing"
+
+# -----------------------------------------------------------------------------
+# Step 1: meshing
 # -----------------------------------------------------------------------------
 echo "==> Running meshing"
 chmod +x ./01_run_meshing.sh
@@ -46,23 +97,31 @@ chmod +x ./01_run_meshing.sh
 # Optional baseline: include instrumented-but-never-executed lines
 # -----------------------------------------------------------------------------
 echo "==> Capturing baseline coverage"
-lcov --capture --initial --directory "$PROJECT_ROOT" --output-file "$COVERAGE_ROOT/coverage_base.info"
+lcov --capture --initial --directory "$COVERAGE_DIR" --output-file "$COVERAGE_ROOT/coverage_base.info"
+
+print_coverage_debug "after baseline capture"
 
 # -----------------------------------------------------------------------------
-# Step 1: field initialization
+# Step 2: field initialization
 # -----------------------------------------------------------------------------
 echo "==> Running field initialization"
 chmod +x ./02_run_fieldInitialization.sh
 ./02_run_fieldInitialization.sh
 
+print_coverage_debug "after field initialization"
+
+require_gcda_files "field initialization"
+
 echo "==> Capturing coverage after initialization run"
-lcov --capture --directory "$PROJECT_ROOT" --output-file "$COVERAGE_ROOT/coverage_init.info"
+lcov --capture --directory "$COVERAGE_DIR" --output-file "$COVERAGE_ROOT/coverage_init.info"
 
 echo "==> Zeroing counters before short simulation run"
-lcov --zerocounters --directory "$PROJECT_ROOT"
+lcov --zerocounters --directory "$COVERAGE_DIR"
+
+print_coverage_debug "after zeroing counters"
 
 # -----------------------------------------------------------------------------
-# Step 2: shortened simulation using controlDict.coverage
+# Step 3: shortened simulation using controlDict.coverage
 # -----------------------------------------------------------------------------
 echo "==> Preparing short coverage simulation"
 
@@ -75,11 +134,15 @@ cp ./constant/cloudProperties.run ./constant/cloudProperties
 echo "==> Running short simulation with $(getApplication)"
 runParallel $(getApplication)
 
+print_coverage_debug "after short simulation"
+
+require_gcda_files "short simulation"
+
 echo "==> Capturing coverage after short simulation run"
-lcov --capture --directory "$PROJECT_ROOT" --output-file "$COVERAGE_ROOT/coverage_sim.info"
+lcov --capture --directory "$COVERAGE_DIR" --output-file "$COVERAGE_ROOT/coverage_sim.info"
 
 # -----------------------------------------------------------------------------
-# Step 3: merge and filter
+# Step 4: merge and filter
 # -----------------------------------------------------------------------------
 echo "==> Merging tracefiles"
 lcov \
@@ -99,5 +162,5 @@ lcov \
 echo "==> Generating HTML report"
 genhtml "$COVERAGE_ROOT/coverage_clean.info" --output-directory "$COVERAGE_ROOT/html"
 
-echo "==> Coverage run completed"
+echo "==> Coverage run completed successfully"
 echo "HTML report: $COVERAGE_ROOT/html/index.html"
