@@ -123,31 +123,6 @@ jobs:
             COVERAGE_ROOT=$(pwd)/coverage PROJECT_ROOT=$(cd ../.. && pwd) COVERAGE_DIR=$(cd ../.. && pwd)/applications/OpenPDAC ./run_coverage_Valentine2020_twoP.sh
           '
 
-      - name: Prepare Pages content
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="${{ steps.check.outputs.version }}"
-          SRC="run/Valentine2020_twoP/coverage/html"
-          PAGES_DIR="pages_site"
-
-          mkdir -p "$PAGES_DIR/$VERSION"
-          cp -r "$SRC"/. "$PAGES_DIR/$VERSION"/
-
-          cat > "$PAGES_DIR/index.html" <<EOF
-          <!doctype html>
-          <html>
-          <head><meta charset="utf-8"><title>OpenPDAC coverage</title></head>
-          <body>
-            <h1>OpenPDAC coverage reports</h1>
-            <p>Latest generated report:</p>
-            <ul>
-              <li><a href="./${VERSION}/index.html">${VERSION}</a></li>
-            </ul>
-          </body>
-          </html>
-          EOF
-
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:
@@ -156,19 +131,3 @@ jobs:
             run/Valentine2020_twoP/coverage/coverage_clean.info
             run/Valentine2020_twoP/coverage/html
           if-no-files-found: error
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: pages_site
-
-  deploy-pages:
-    needs: build-coverage
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
