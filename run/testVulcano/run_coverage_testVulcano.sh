@@ -2,28 +2,31 @@
 set -e
 
 # =============================================================================
-# Coverage run for OpenPDAC-13/run/testVulcano
+# Coverage workflow for OpenPDAC-13/run/testVulcano
 # -----------------------------------------------------------------------------
 # Purpose
-#   This script runs a coverage-oriented version of the testVulcano case for
-#   OpenPDAC. It is intended for CI and release-quality assessment workflows.
+#   This script runs a coverage-oriented version of the testVulcano case.
 #
-# What it does
-#   1. Runs meshing
-#   2. Captures a baseline coverage trace
-#   3. Runs field initialization (first foamRun)
-#   4. Checks whether .gcda files were generated
-#   5. Captures coverage for the initialization run
-#   6. Resets coverage counters
-#   7. Runs a shortened simulation using controlDict.coverage (second foamRun)
-#   8. Checks whether .gcda files were generated
-#   9. Captures coverage for the simulation run
-#  10. Merges the tracefiles, filters external code, and generates HTML
+# Strategy
+#   - Meshing and topoGrid are executed in parallel, as in the standard setup.
+#   - After topoGrid, the decomposed case is reconstructed.
+#   - The actual solver runs used for coverage are then executed in serial.
+#
+# Coverage flow
+#   1. Clean case
+#   2. Run geometry preparation and meshing
+#   3. Decompose and modify the mesh in parallel
+#   4. Reconstruct the case after topoGrid
+#   5. Run field initialization in serial
+#   6. Capture coverage for the initialization run
+#   7. Zero counters
+#   8. Run a short serial simulation using controlDict.coverage
+#   9. Capture coverage for the simulation run
+#  10. Merge tracefiles, filter external code, and generate HTML
 #
 # Notes
 #   - Post-processing is intentionally skipped.
-#   - Coverage capture is focused on applications/OpenPDAC, because this is the
-#     location where OpenPDAC coverage files were observed locally.
+#   - Coverage capture is focused on applications/OpenPDAC.
 # =============================================================================
 
 cd "${0%/*}" || exit 1
@@ -34,19 +37,19 @@ COVERAGE_DIR="${COVERAGE_DIR:-$PROJECT_ROOT/applications/OpenPDAC}"
 
 mkdir -p "$COVERAGE_ROOT"
 
-echo "==> Project root:   $PROJECT_ROOT"
-echo "==> Coverage root:  $COVERAGE_ROOT"
-echo "==> Coverage dir:   $COVERAGE_DIR"
+echo "==> Project root:  $PROJECT_ROOT"
+echo "==> Coverage root: $COVERAGE_ROOT"
+echo "==> Coverage dir:  $COVERAGE_DIR"
 
 # -----------------------------------------------------------------------------
 # Helper: print coverage debug information
 # -----------------------------------------------------------------------------
 print_coverage_debug() {
-    local label="$1"
+    label="$1"
 
     echo "============================================================"
     echo "Coverage debug: $label"
-    echo "Target coverage directory: $COVERAGE_DIR"
+    echo "Coverage dir: $COVERAGE_DIR"
     echo "------------------------------------------------------------"
 
     echo "[gcno] First matches:"
@@ -55,46 +58,115 @@ print_coverage_debug() {
     find "$COVERAGE_DIR" -name "*.gcno" | wc -l || true
 
     echo "------------------------------------------------------------"
-    echo "[gcda] First matches:"
+    echo "[gcda] First matches in COVERAGE_DIR:"
     find "$COVERAGE_DIR" -name "*.gcda" | head -50 || true
-    echo "[gcda] Count:"
+    echo "[gcda] Count in COVERAGE_DIR:"
     find "$COVERAGE_DIR" -name "*.gcda" | wc -l || true
+
+    echo "------------------------------------------------------------"
+    echo "[gcda] First matches in PROJECT_ROOT:"
+    find "$PROJECT_ROOT" -name "*.gcda" | head -50 || true
+    echo "[gcda] Count in PROJECT_ROOT:"
+    find "$PROJECT_ROOT" -name "*.gcda" | wc -l || true
+
+    echo "------------------------------------------------------------"
+    echo "[gcda] First matches in \$HOME/OpenFOAM:"
+    find "$HOME/OpenFOAM" -name "*.gcda" | head -50 || true
+    echo "[gcda] Count in \$HOME/OpenFOAM:"
+    find "$HOME/OpenFOAM" -name "*.gcda" | wc -l || true
 
     echo "============================================================"
 }
 
 # -----------------------------------------------------------------------------
-# Optional helper: fail clearly if no gcda files are present
+# Helper: fail clearly if no gcda files are present in the coverage directory
 # -----------------------------------------------------------------------------
 require_gcda_files() {
-    local label="$1"
-    local count
-
+    label="$1"
     count=$(find "$COVERAGE_DIR" -name "*.gcda" | wc -l)
 
     if [ "$count" -eq 0 ]; then
         echo "ERROR: No .gcda files found in $COVERAGE_DIR after $label"
         echo "This usually means that either:"
-        echo "  - coverage instrumentation was not applied correctly, or"
-        echo "  - the executed code did not produce runtime coverage files here."
+        echo "  - the instrumented code was not actually executed, or"
+        echo "  - runtime coverage files were written somewhere else."
         exit 1
     fi
 }
 
 # -----------------------------------------------------------------------------
-# Step 0: show initial debug state
+# OpenFOAM helper functions
+# -----------------------------------------------------------------------------
+. "$WM_PROJECT_DIR/bin/tools/RunFunctions"
+
+# -----------------------------------------------------------------------------
+# Optional Conda activation for Python preprocessing
+# -----------------------------------------------------------------------------
+if command -v conda >/dev/null 2>&1; then
+    # shellcheck disable=SC1091
+    . "$(conda info --base)/etc/profile.d/conda.sh"
+    conda activate OpenPDACconda || true
+fi
+
+# -----------------------------------------------------------------------------
+# Step 0: initial debug
 # -----------------------------------------------------------------------------
 print_coverage_debug "before meshing"
 
 # -----------------------------------------------------------------------------
-# Step 1: meshing
+# Step 1: clean case
 # -----------------------------------------------------------------------------
-echo "==> Running meshing"
-chmod +x ./01_run_meshing.sh
-./01_run_meshing.sh
+echo "==> Cleaning case"
+chmod +x ./Allclean
+./Allclean
 
 # -----------------------------------------------------------------------------
-# Optional baseline: include instrumented-but-never-executed lines
+# Step 2: geometry preparation and meshing
+# -----------------------------------------------------------------------------
+echo "==> Running Python preprocessing"
+python3 smoothCraterArea.py > log.smoothCreaterArea
+
+cp ./system/controlDict.init ./system/controlDict
+
+echo "==> Running blockMesh"
+runApplication blockMesh
+
+echo "==> Preparing initial fields from org.0"
+rm -rf 0
+cp -r org.0 0
+
+echo "==> Decomposing case"
+runApplication decomposePar
+
+echo "==> Parallel mesh quality check before topoGrid"
+runParallel checkMesh -allGeometry -allTopology -writeSets
+mv log.checkMesh log.checkMesh0 || true
+
+echo "==> Creating zones"
+runParallel createZones
+
+echo "==> Running topoGrid"
+runParallel topoGrid
+
+echo "==> Parallel mesh quality check after topoGrid"
+runParallel checkMesh -allGeometry -allTopology -writeSets
+
+# -----------------------------------------------------------------------------
+# Step 3: reconstruct decomposed case and switch to serial
+# -----------------------------------------------------------------------------
+echo "==> Reconstructing decomposed case"
+
+# Reconstruct mesh first
+runApplication reconstructParMesh -constant
+
+# Reconstruct fields/times if present
+runApplication reconstructPar
+
+echo "==> Removing processor directories"
+rm -rf processor*
+
+# -----------------------------------------------------------------------------
+# Baseline coverage
 # -----------------------------------------------------------------------------
 echo "==> Capturing baseline coverage"
 lcov --capture --initial --directory "$COVERAGE_DIR" --output-file "$COVERAGE_ROOT/coverage_base.info"
@@ -102,15 +174,24 @@ lcov --capture --initial --directory "$COVERAGE_DIR" --output-file "$COVERAGE_RO
 print_coverage_debug "after baseline capture"
 
 # -----------------------------------------------------------------------------
-# Step 2: field initialization
+# Step 4: field initialization in serial
 # -----------------------------------------------------------------------------
-echo "==> Running field initialization"
-chmod +x ./02_run_fieldInitialization.sh
-./02_run_fieldInitialization.sh
+echo "==> Preparing case for serial field initialization"
+cp ./system/controlDict.init ./system/controlDict
+cp ./system/fvSolution.init ./system/fvSolution
+cp ./constant/cloudProperties.init ./constant/cloudProperties
 
-print_coverage_debug "after field initialization"
+echo "==> Running serial field initialization with $(getApplication)"
+runApplication $(getApplication)
 
-require_gcda_files "field initialization"
+mv log.foamRun log.foamRun0 || true
+
+echo "==> Running setFields in serial"
+runApplication setFields
+
+print_coverage_debug "after serial field initialization"
+
+require_gcda_files "serial field initialization"
 
 echo "==> Capturing coverage after initialization run"
 lcov --capture --directory "$COVERAGE_DIR" --output-file "$COVERAGE_ROOT/coverage_init.info"
@@ -121,28 +202,25 @@ lcov --zerocounters --directory "$COVERAGE_DIR"
 print_coverage_debug "after zeroing counters"
 
 # -----------------------------------------------------------------------------
-# Step 3: shortened simulation using controlDict.coverage
+# Step 5: short simulation in serial using controlDict.coverage
 # -----------------------------------------------------------------------------
-echo "==> Preparing short coverage simulation"
-
+echo "==> Preparing short serial simulation"
 cp ./system/controlDict.coverage ./system/controlDict
 cp ./system/fvSolution.run ./system/fvSolution
 cp ./constant/cloudProperties.run ./constant/cloudProperties
 
-. "$WM_PROJECT_DIR/bin/tools/RunFunctions"
+echo "==> Running short serial simulation with $(getApplication)"
+runApplication $(getApplication)
 
-echo "==> Running short simulation with $(getApplication)"
-runParallel $(getApplication)
+print_coverage_debug "after short serial simulation"
 
-print_coverage_debug "after short simulation"
-
-require_gcda_files "short simulation"
+require_gcda_files "short serial simulation"
 
 echo "==> Capturing coverage after short simulation run"
 lcov --capture --directory "$COVERAGE_DIR" --output-file "$COVERAGE_ROOT/coverage_sim.info"
 
 # -----------------------------------------------------------------------------
-# Step 4: merge and filter
+# Step 6: merge and filter
 # -----------------------------------------------------------------------------
 echo "==> Merging tracefiles"
 lcov \
@@ -162,5 +240,6 @@ lcov \
 echo "==> Generating HTML report"
 genhtml "$COVERAGE_ROOT/coverage_clean.info" --output-directory "$COVERAGE_ROOT/html"
 
+# -----------------------------------------------------------------------------
 echo "==> Coverage run completed successfully"
 echo "HTML report: $COVERAGE_ROOT/html/index.html"
