@@ -109,9 +109,10 @@ jobs:
         shell: bash
         run: |
           bash -ic '
-            set -e
             set +m
+            
             conda activate OpenPDACconda
+            
             source /opt/openfoam13/etc/bashrc
             cd run/testVulcano
             chmod +x ./run_coverage_testVulcano.sh
