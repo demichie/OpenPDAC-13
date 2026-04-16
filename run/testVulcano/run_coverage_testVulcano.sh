@@ -124,7 +124,10 @@ chmod +x ./Allclean
 # Step 2: geometry preparation and meshing
 # -----------------------------------------------------------------------------
 echo "==> Running Python preprocessing"
+cd constant/DEM
+unzip dsm.zip
 python3 smoothCraterArea.py > log.smoothCreaterArea
+cd ../../
 
 cp ./system/controlDict.init ./system/controlDict
 
