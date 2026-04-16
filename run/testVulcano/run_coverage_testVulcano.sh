@@ -126,8 +126,8 @@ chmod +x ./Allclean
 echo "==> Running Python preprocessing"
 cd constant/DEM
 unzip dsm.zip
-python3 smoothCraterArea.py > log.smoothCreaterArea
 cd ../../
+python3 smoothCraterArea.py > log.smoothCreaterArea
 
 cp ./system/controlDict.init ./system/controlDict
 
