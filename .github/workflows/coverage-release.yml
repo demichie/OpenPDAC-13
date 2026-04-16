@@ -109,18 +109,18 @@ jobs:
             wmake
           '
 
-      - name: Run testVulcano coverage
+      - name: Run Valentine2020_twoP coverage
         shell: bash
         run: |
           bash -ic '
             set +m
-            
+
             conda activate OpenPDACconda
-            
             source /opt/openfoam13/etc/bashrc
-            cd run/testVulcano
-            chmod +x ./run_coverage_testVulcano.sh
-            COVERAGE_ROOT=$(pwd)/coverage PROJECT_ROOT=$(cd ../.. && pwd) ./run_coverage_testVulcano.sh
+
+            cd run/Valentine2020_twoP
+            chmod +x ./run_coverage_Valentine2020_twoP.sh
+            COVERAGE_ROOT=$(pwd)/coverage PROJECT_ROOT=$(cd ../.. && pwd) COVERAGE_DIR=$(cd ../.. && pwd)/applications/OpenPDAC ./run_coverage_Valentine2020_twoP.sh
           '
 
       - name: Prepare Pages content
@@ -128,7 +128,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ steps.check.outputs.version }}"
-          SRC="run/testVulcano/coverage/html"
+          SRC="run/Valentine2020_twoP/coverage/html"
           PAGES_DIR="pages_site"
 
           mkdir -p "$PAGES_DIR/$VERSION"
@@ -153,8 +153,8 @@ jobs:
         with:
           name: coverage-report-${{ steps.check.outputs.version }}
           path: |
-            run/testVulcano/coverage/coverage_clean.info
-            run/testVulcano/coverage/html
+            run/Valentine2020_twoP/coverage/coverage_clean.info
+            run/Valentine2020_twoP/coverage/html
           if-no-files-found: error
 
       - name: Upload Pages artifact
