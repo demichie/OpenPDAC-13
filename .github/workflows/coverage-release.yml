@@ -84,10 +84,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          find . -name "options" -type f | xargs sed -i '$a \
-          EXE_INC += -O0 -fprofile-arcs -ftest-coverage\
-          LIB_LIBS += -fprofile-arcs -ftest-coverage\
-          EXE_LIBS += -fprofile-arcs -ftest-coverage'
+          cd applications/OpenPDAC
+
+          find . -name "options" -type f | while read -r f; do
+            echo "Patching $f"
+            sed -i '$a EXE_INC += -O0 -fprofile-arcs -ftest-coverage LIB_LIBS += -fprofile-arcs -ftest-coverage EXE_LIBS += -fprofile-arcs -ftest-coverage' "$f"
+            tail -n 5 "$f"
+          done
 
       - name: Build with coverage instrumentation
         run: |
