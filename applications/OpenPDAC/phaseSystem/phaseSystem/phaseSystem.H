@@ -192,6 +192,10 @@ protected:
     //- Threshold for polydisperse packing model
     dimensionedScalar alphasThreshold_;
 
+    // Swtich to include the derivative of the radial function in
+    // the solid pressure gradient
+    Switch includeG0primeInPPrime_;
+
     //- Surface tension models
     const surfaceTensionCoefficientModelTable surfaceTensionCoefficientModels_;
 
@@ -328,6 +332,8 @@ public:
     //- Return alphasThreshold
     inline const dimensionedScalar& alphasThreshold() const;
 
+    //- Return includeG0primeInPPrime
+    inline const Switch& includeG0primeInPPrime() const;
 
     // Sub-model lookup
 

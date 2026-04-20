@@ -200,6 +200,10 @@ Foam::phaseSystem::phaseSystem(const fvMesh& mesh)
 
   alphasThreshold_("alphasThreshold", dimless, subDict("kineticProperties")),
 
+  includeG0primeInPPrime_(
+      subDict("kineticProperties")
+          .lookupOrDefault<Switch>("includeG0primeInPPrime", true)),
+
   surfaceTensionCoefficientModels_(
       generateInterfacialModels<surfaceTensionCoefficientModel>(
           *this, subDict(modelName<surfaceTensionCoefficientModel>())))

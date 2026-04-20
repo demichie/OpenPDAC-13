@@ -249,6 +249,10 @@ inline const Foam::dimensionedScalar& Foam::phaseSystem::alphasThreshold() const
     return alphasThreshold_;
 }
 
+inline const Foam::Switch& Foam::phaseSystem::includeG0primeInPPrime() const
+{
+    return includeG0primeInPPrime_;
+}
 
 // * * * * * * * * * * * * * * * Global Functions  * * * * * * * * * * * * * //
 

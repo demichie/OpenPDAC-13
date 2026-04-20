@@ -116,9 +116,26 @@ void Foam::solvers::OpenPDAC::correctCoNum()
 
     forAll(movingPhases, movingPhasei)
     {
+
+        const phaseModel& phase = movingPhases[movingPhasei];
+
+        const volScalarField& alpha = phase;
+
+        const surfaceScalarField alphaf(
+            fvc::interpolate(max(alpha, scalar(0))));
+
+        const dimensionedScalar alphaRes(
+            max(phase.residualAlpha(), dimensionedScalar(dimless, small)));
+        const surfaceScalarField wf(min(scalar(1), alphaf / alphaRes));
+
         sumPhi = max(sumPhi,
-                     fvc::surfaceSum(mag(movingPhases[movingPhasei].phi()))()
-                         .primitiveField());
+                     fvc::surfaceSum(mag(wf * phase.phi()))().primitiveField());
+
+        /*
+        sumPhi = max(sumPhi,
+                    fvc::surfaceSum(mag(movingPhases[movingPhasei].phi()))()
+                    .primitiveField());
+        */
     }
 
     if (lowPressureTimestepCorrection)

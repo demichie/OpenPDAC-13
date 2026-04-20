@@ -7,6 +7,7 @@ radialModel/radialModel/radialModelNew.C
 radialModel/SinclairJackson/SinclairJackson.C
 radialModel/Lebowitz/Lebowitz.C
 radialModel/CarnahanStarling/CarnahanStarling.C
+radialModel/MansooriBoublick/MansooriBoublick.C
 
 phaseInterface/phaseInterfaceKey/phaseInterfaceKey.C
 phaseInterface/phaseInterface/phaseInterface.C

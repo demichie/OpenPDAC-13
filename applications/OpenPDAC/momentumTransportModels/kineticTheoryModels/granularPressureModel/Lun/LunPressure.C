@@ -102,13 +102,41 @@ Foam::kineticTheoryModels::granularPressureModels::Lun::
 {
     const phaseSystem& fluid = phase1.fluid();
 
+    // eta = (1 + e)/2, used to write the collisional contribution
+    // in the compact form 4*eta = 2*(1 + e).
     const dimensionedScalar eta("eta", dimless, 0.5 * (1.0 + e.value()));
 
+    // This function returns the derivative of the granular-pressure
+    // coefficient with respect to alpha_1, i.e. the coefficient C'_1
+    // such that:
+    //
+    //     p'_1 = Theta_1 * C'_1 + p'_{1,fric}
+    //
+    // For the Lun model:
+    //
+    //     p_{1,k} = rho_1 * alpha_1 * [1 + 2(1 + e) * Sigma_1] * Theta_1
+    //
+    // with
+    //
+    //     Sigma_1 = sum_m alpha_m * g0_{1m}.
+    //
+    // Therefore, in the frozen-g0 approximation:
+    //
+    //     C'_1 = rho_1 + 2(1 + e) * rho_1 * Sigma_1
+    //          = rho_1 + 4*eta*rho_1*Sigma_1.
+    //
+    // The first term below is the kinetic contribution "rho_1".
     tmp<volScalarField> tpCoeffPrime(
         volScalarField::New("granularPressureCoeffPrime", rho1));
 
     volScalarField& pCoeffPrime = tpCoeffPrime.ref();
 
+    // Add the collisional contribution in frozen-g0 form:
+    //
+    //     4*eta*rho_1*Sigma_1
+    //   = 4*eta*rho_1*sum_m(alpha_m*g0_{1m})
+    //
+    // This is the split-consistent multi-solid form used by default.
     forAll(fluid.phases(), phasei)
     {
         const phaseModel& phase2 = fluid.phases()[phasei];
@@ -119,6 +147,33 @@ Foam::kineticTheoryModels::granularPressureModels::Lun::
 
             pCoeffPrime += rho1 * (4.0 * eta * alpha2 * g0_im[phasei]);
         }
+    }
+
+    // Optional correction:
+    // when includeG0primeInPPrime() is enabled, add the derivative terms
+    // associated with the alpha_1-dependence of alpha_1*g0_{11}.
+    //
+    // In the monodisperse limit:
+    //
+    //     d/dalpha_1 [alpha_1^2 g0_{11}]
+    //   = 2*alpha_1*g0_{11} + alpha_1^2*g0'_{11}.
+    //
+    // One factor alpha_1*g0_{11} is already contained in the frozen-g0 sum
+    // above. The additional term added here is therefore:
+    //
+    //     alpha_1*g0_{11} + alpha_1^2*g0'_{11},
+    //
+    // so that the total result recovers the full analytical derivative of
+    // the original monodisperse Lun expression.
+    if (fluid.includeG0primeInPPrime())
+    {
+        const volScalarField& alpha1 = phase1;
+        const label index1 = phase1.index();
+
+        pCoeffPrime +=
+            rho1
+            * (4.0 * eta
+               * (alpha1 * g0_im[index1] + sqr(alpha1) * g0prime_im[index1]));
     }
 
     return tpCoeffPrime;

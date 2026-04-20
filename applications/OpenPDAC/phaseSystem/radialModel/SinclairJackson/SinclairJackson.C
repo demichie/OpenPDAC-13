@@ -126,13 +126,13 @@ Foam::radialModels::SinclairJackson::g0prime(
     const dimensionedScalar& alphaMinFriction,
     const volScalarField& alphasMax) const
 {
-    // alpha_i of the phase for which the derivative is taken.
+    // alpha_i of the phase with respect to which the derivative is taken.
     // In the current OpenPDAC design, this function returns:
     //
     //     g0prime_im[m] = d g0_{i,m} / d alpha_i
     //
-    // i.e. the derivative of all pair radial functions involving phase i
-    // with respect to the volume fraction of the same phase i.
+    // i.e. the derivative of all pair radial-distribution functions involving
+    // phase i with respect to the volume fraction of the same phase i.
     const volScalarField& alphai = phasei;
     const label& indexi = phasei.index();
     const phaseSystem& fluid = phasei.fluid();
@@ -176,31 +176,51 @@ Foam::radialModels::SinclairJackson::g0prime(
     }
 
     // Total solids volume fraction.
-    // The base Sinclair-Jackson singularity depends only on alpha_s,tot.
+    // The Sinclair-Jackson singularity depends only on alpha_s,tot.
     volScalarField alphas = 1.0 - continuousPhase;
 
     // ---------------------------------------------------------------------
-    // Base radial function:
+    // Base radial function used in g0():
     //
-    //     g0_base = 1 / (1 - cbrt(min(alpha_s,tot,
-    //     alphaMinFriction)/alphasMax))
+    //     g0_base = 1 / (1 - cbrt(min(alpha_s,tot, alphaMinFriction)
+    //                             / alphasMax))
     //
-    // The derivative below is the derivative of the active (unclamped) branch.
-    // The clamp is then enforced by the mask "posCoeff", which sets the
-    // derivative to zero outside the interval where the base function varies.
+    // To make g0prime consistent with the actual g0() implementation:
+    //
+    // - for alpha_s,tot < alphaMinFriction, differentiate the active branch;
+    // - for alpha_s,tot >= alphaMinFriction, the min() clamp is active and
+    //   the derivative must be zero.
+    //
+    // No additional low-alpha cutoff is introduced here, because g0() itself
+    // does not contain it.
     // ---------------------------------------------------------------------
-    volScalarField aByaMax(
-        cbrt(min(max(alphas, scalar(1e-3)), alphaMinFriction) / alphasMax));
 
-    volScalarField g0primeBase((1.0 / (3.0 * alphasMax))
-                               / sqr(aByaMax - sqr(aByaMax)));
+    const dimensionedScalar smallAlpha("smallAlpha", dimless, ROOTVSMALL);
 
-    // The base term is constant below 1e-3 and above alphaMinFriction because
-    // of the clamp, so its derivative must vanish there.
-    volScalarField posCoeff(pos(alphaMinFriction - alphas)
-                            * pos(alphas - scalar(1e-3)));
+    // Active branch indicator for min(alphas, alphaMinFriction)
+    volScalarField activeBranch(pos(alphaMinFriction - alphas));
 
-    g0primeBase *= posCoeff;
+    // Ratio alpha_s,tot / alpha_s,max, protected only against division by zero
+    volScalarField ratio(alphas / max(alphasMax, smallAlpha));
+
+    // Regularized ratio used only to avoid division by zero in ratio^(-2/3).
+    // The activeBranch mask guarantees that the derivative is zero when the
+    // min() clamp is active.
+    volScalarField ratioSafe(max(ratio, scalar(ROOTVSMALL)));
+
+    volScalarField cbrtRatio(cbrt(ratioSafe));
+
+    // d/dalpha_i [ cbrt(alpha_s,tot / alphasMax) ]
+    //   = 1/(3*alphasMax) * (alpha_s,tot/alphasMax)^(-2/3)
+    //
+    // because d(alpha_s,tot)/d(alpha_i) = 1.
+    volScalarField dcbrtRatiodAlphai(
+        activeBranch
+        * ((1.0 / (3.0 * max(alphasMax, smallAlpha))) / sqr(cbrtRatio)));
+
+    // g0_base = 1 / (1 - cbrtRatio)
+    // dg0_base/dalpha_i = dcbrtRatio/dalpha_i / (1 - cbrtRatio)^2
+    volScalarField g0primeBase(dcbrtRatiodAlphai / sqr(1.0 - cbrtRatio));
 
     // ---------------------------------------------------------------------
     // Derivative of the "diagonal" pair quantity g0_mm^(m):
@@ -241,8 +261,6 @@ Foam::radialModels::SinclairJackson::g0prime(
     //     d g0_{i,m} / d alpha_i
     //   = [ d_m * d(g0_mm^(i))/dalpha_i + d_i * d(g0_mm^(m))/dalpha_i ]
     //     / (d_i + d_m)
-    //
-    // Therefore the weights in g0prime_im must be the same as in g0_im.
     // ---------------------------------------------------------------------
     forAll(g0prime_im, iter)
     {
@@ -261,6 +279,5 @@ Foam::radialModels::SinclairJackson::g0prime(
 
     return g0prime_im;
 }
-
 
 // ************************************************************************* //
