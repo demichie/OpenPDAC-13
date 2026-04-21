@@ -62,6 +62,7 @@ Foam::tmp<Foam::volScalarField> Foam::dragModels::WenYu::CdRe() const
 
     const volScalarField Res(alpha2 * interface_.Re());
 
+    /*
     Info << "WenYu: dispersed min/max = " << min(interface_.dispersed()).value()
          << " " << max(interface_.dispersed()).value() << nl;
 
@@ -71,10 +72,8 @@ Foam::tmp<Foam::volScalarField> Foam::dragModels::WenYu::CdRe() const
     Info << "WenYu: Re min/max = " << min(interface_.Re()).value() << " "
          << max(interface_.Re()).value() << nl;
 
-    /*
-    Info << "Re min, max = " << min(interface_.Re()).value()  << " " <<
-    max(interface_.Re()).value() << endl;
-    */
+    Info << "Re min, max = " << min(interface_.Re()).value() << " "
+         << max(interface_.Re()).value() << endl;
 
     Info << "nu min, max = "
          << min(interface_.continuous().fluidThermo().nu()).value() << " "
@@ -84,10 +83,10 @@ Foam::tmp<Foam::volScalarField> Foam::dragModels::WenYu::CdRe() const
          << min(interface_.continuous().fluidThermo().rho()).value() << " "
          << max(interface_.continuous().fluidThermo().rho()).value() << endl;
 
-    /*
-        Info << "Res min, max = " << min(Res).value()  << " " <<
-       max(Res).value() << endl;
-        */
+    Info << "Res min, max = " << min(Res).value() << " " << max(Res).value()
+         << endl;
+    */
+
 
     const volScalarField CdsRes(neg(Res - 1000) * 24
                                     * (1.0 + 0.15 * pow(Res, 0.687))

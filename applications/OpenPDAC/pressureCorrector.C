@@ -33,7 +33,28 @@ void Foam::solvers::OpenPDAC::pressureCorrector()
 
     if (forceFinalPimpleIter_ && !pimple.finalIter())
     {
-        // Do nothing, this iteration is being skipped.
+        const DynamicList<SolverPerformance<scalar>>& spConst =
+            Residuals<scalar>::field(mesh, "p_rgh");
+
+        DynamicList<SolverPerformance<scalar>>& sp =
+            const_cast<DynamicList<SolverPerformance<scalar>>&>(spConst);
+
+        Info << "Bypass p_rgh residual history size before append = "
+             << sp.size() << endl;
+
+        sp.append(SolverPerformance<scalar>("bypass",
+                                            "p_rgh",
+                                            prevPimpleInitialResidual_,
+                                            prevPimpleInitialResidual_,
+                                            0,
+                                            false,
+                                            false));
+
+        Info << "Bypass p_rgh residual history size after append = "
+             << sp.size()
+             << ", copied initial residual = " << prevPimpleInitialResidual_
+             << endl;
+
         return;
     }
 

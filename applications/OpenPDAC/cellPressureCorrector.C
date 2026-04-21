@@ -402,7 +402,7 @@ void Foam::solvers::OpenPDAC::cellPressureCorrector()
                                 if (ratioFirstCheck)
                                 {
                                     Info << "  --> PIMPLE: Initial residual "
-                                            "increased. "
+                                            "reduction insufficient. "
                                          << "Scheduling jump to final iter."
                                          << endl;
                                     forceFinalPimpleIter_ = true;
