@@ -225,6 +225,17 @@ void Foam::solvers::OpenPDAC::thermophysicalPredictor()
         // Solve the linear system. OpenFOAM prints "Linear Residuals" here.
         energyPredictor();
 
+        forAll(fluid.thermalPhases(), thermalPhasei)
+        {
+            const phaseModel& phase = fluid.thermalPhases()[thermalPhasei];
+            checkFiniteField(
+                phase.thermo().he(),
+                "thermophysicalPredictor: after energyPredictor he");
+            checkFiniteField(
+                phase.thermo().T(),
+                "thermophysicalPredictor: after energyPredictor T");
+        }
+
         // ======================================================
         // AITKEN ACCELERATION (Continuous Phase Only)
         // Applied to the Displacement Vector (Delta h)
@@ -253,12 +264,20 @@ void Foam::solvers::OpenPDAC::thermophysicalPredictor()
                                       deltaDispl.primitiveField());
                 scalar den = gSumSqr(deltaDispl.primitiveField());
 
+                checkFiniteScalar(
+                    num, "Aitken numerator", "thermophysicalPredictor");
+                checkFiniteScalar(
+                    den, "Aitken denominator", "thermophysicalPredictor");
+
                 if (den > SMALL)
                 {
                     scalar omega = 1.0 - (num / den);
 
                     // Stable clamp for stiff thermodynamic systems
                     omega = max(0.2, min(omega, 1.2));
+
+                    checkFiniteScalar(
+                        omega, "Aitken omega", "thermophysicalPredictor");
 
                     Info << "  Continuous Aitken omega: " << omega << endl;
 
@@ -308,11 +327,25 @@ void Foam::solvers::OpenPDAC::thermophysicalPredictor()
             const phaseModel& phase = fluid.thermalPhases()[thermalPhasei];
 
             word name(phase.thermo().he().name());
+
             const DynamicList<SolverPerformance<scalar>>& sp(
                 Residuals<scalar>::field(mesh, name));
+
             label n = sp.size();
 
+            if (n == 0)
+            {
+                FatalErrorInFunction
+                    << "Empty solverPerformance list for " << name
+                    << " at time = " << mesh().time().name()
+                    << ", PIMPLE iter = " << pimpleIter << exit(FatalError);
+            }
+
             scalar r0 = cmptMax(sp[n - 1].initialResidual());
+            checkFiniteScalar(
+                r0, name + " initial residual", "thermophysicalPredictor");
+
+
             Info << name << " initial residual " << r0 << endl;
 
             if (energyControlDict.found(name))

@@ -306,11 +306,30 @@ void Foam::solvers::OpenPDAC::facePressureCorrector()
 
                     pEqn.solve();
 
+                    checkFiniteField(
+                        p_rgh, "facePressureCorrector: after pEqn.solve()");
+                    checkFiniteField(
+                        p, "facePressureCorrector: after pEqn.solve()");
+                    checkFiniteField(
+                        rho, "facePressureCorrector: after pEqn.solve()");
+
                     const DynamicList<SolverPerformance<scalar>> sp(
                         Residuals<scalar>::field(mesh, "p_rgh"));
 
                     label n = sp.size();
+
+                    if (n == 0)
+                    {
+                        FatalErrorInFunction
+                            << "Empty solverPerformance list for p_rgh"
+                            << " at time = " << mesh().time().name()
+                            << ", PIMPLE iter = " << pimpleIter
+                            << exit(FatalError);
+                    }
+
                     r0 = cmptMax(sp[n - 1].initialResidual());
+                    checkFiniteScalar(
+                        r0, "p_rgh initial residual", "facePressureCorrector");
 
                     if (pimple.firstNonOrthogonalIter()
                         && pimple.firstPisoIter() && !pimple.finalIter())
@@ -485,6 +504,11 @@ void Foam::solvers::OpenPDAC::facePressureCorrector()
             rho = fluid.rho();
             p_rgh = p - rho * buoyancy.gh;
             // p_rgh = p - rho*buoyancy.gh - buoyancy.pRef;
+
+            checkFiniteField(p, "facePressureCorrector: after p update");
+            checkFiniteField(p_rgh,
+                             "facePressureCorrector: after p_rgh update");
+            checkFiniteField(rho, "facePressureCorrector: after rho recompute");
 
             surfaceScalarField::Boundary phib(
                 surfaceScalarField::Internal::null(), phi.boundaryField());

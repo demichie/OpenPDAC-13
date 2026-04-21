@@ -353,11 +353,29 @@ void Foam::solvers::OpenPDAC::cellPressureCorrector()
 
                     pEqn.solve();
 
+                    checkFiniteField(
+                        p_rgh, "cellPressureCorrector: after pEqn.solve()");
+                    checkFiniteField(
+                        p, "cellPressureCorrector: after pEqn.solve()");
+                    checkFiniteField(
+                        rho, "cellPressureCorrector: after pEqn.solve()");
+
                     const DynamicList<SolverPerformance<scalar>> sp(
                         Residuals<scalar>::field(mesh, "p_rgh"));
 
                     label n = sp.size();
+                    if (n == 0)
+                    {
+                        FatalErrorInFunction
+                            << "Empty solverPerformance list for p_rgh"
+                            << " at time = " << mesh().time().name()
+                            << ", PIMPLE iter = " << pimpleIter
+                            << exit(FatalError);
+                    }
                     r0 = cmptMax(sp[n - 1].initialResidual());
+                    checkFiniteScalar(
+                        r0, "p_rgh initial residual", "cellPressureCorrector");
+
 
                     if (pimple.firstNonOrthogonalIter()
                         && pimple.firstPisoIter() && !pimple.finalIter())
@@ -563,6 +581,11 @@ void Foam::solvers::OpenPDAC::cellPressureCorrector()
             rho = fluid.rho();
             p_rgh = p - rho * buoyancy.gh;
             // p_rgh = p - rho*buoyancy.gh - buoyancy.pRef;
+
+            checkFiniteField(p, "cellPressureCorrector: after p update");
+            checkFiniteField(p_rgh,
+                             "cellPressureCorrector: after p_rgh update");
+            checkFiniteField(rho, "cellPressureCorrector: after rho recompute");
         }
 
         if ((r0Inner <= innerResidual) && (!checkInnerResidual))

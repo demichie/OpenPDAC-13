@@ -180,6 +180,35 @@ void Foam::solvers::OpenPDAC::correctCoNum()
     }
 }
 
+void Foam::solvers::OpenPDAC::checkFiniteScalar(const scalar x,
+                                                const word& name,
+                                                const word& where) const
+{
+    if (!std::isfinite(x))
+    {
+        FatalErrorInFunction
+            << "Non-finite scalar detected: " << name << " = " << x << " at "
+            << where << ", time = " << mesh().time().name()
+            << ", PIMPLE iter = " << pimpleIter << exit(FatalError);
+    }
+}
+
+
+void Foam::solvers::OpenPDAC::checkFiniteField(const volScalarField& fld,
+                                               const word& where) const
+{
+    const scalar fMin = min(fld).value();
+    const scalar fMax = max(fld).value();
+
+    if (!std::isfinite(fMin) || !std::isfinite(fMax))
+    {
+        FatalErrorInFunction
+            << "Non-finite field detected: " << fld.name() << " at " << where
+            << ", min = " << fMin << ", max = " << fMax
+            << ", time = " << mesh().time().name()
+            << ", PIMPLE iter = " << pimpleIter << exit(FatalError);
+    }
+}
 
 // * * * * * * * * * * * * * * * * Constructors  * * * * * * * * * * * * * * //
 
@@ -465,6 +494,16 @@ void Foam::solvers::OpenPDAC::prePredictor()
         fluid_.solve(alphaControls, rAs, momentumTransferSystem_);
 
         fluid_.correct();
+
+        checkFiniteField(p_rgh_, "prePredictor: after fluid_.solve");
+        checkFiniteField(p_, "prePredictor: after fluid_.solve");
+
+        forAll(phases_, phasei)
+        {
+            const phaseModel& phase = phases_[phasei];
+            checkFiniteField(phase, "prePredictor: phase alpha");
+            checkFiniteField(phase.rho(), "prePredictor: phase rho");
+        }
 
         // Reset dmdts to zero
         forAll(dmdts_, i)

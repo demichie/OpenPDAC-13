@@ -202,7 +202,7 @@ Foam::phaseSystem::phaseSystem(const fvMesh& mesh)
 
   includeG0primeInPPrime_(
       subDict("kineticProperties")
-          .lookupOrDefault<Switch>("includeG0primeInPPrime", true)),
+          .lookupOrDefault<Switch>("includeG0primeInPPrime", false)),
 
   surfaceTensionCoefficientModels_(
       generateInterfacialModels<surfaceTensionCoefficientModel>(

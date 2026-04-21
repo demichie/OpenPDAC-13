@@ -254,6 +254,13 @@ private:
     PtrList<fvScalarMatrix>
     compressibilityEqns(const PtrList<volScalarField::Internal>& dmdts) const;
 
+    //- Check a scalar field for non-finite values using global min/max
+    void checkFiniteField(const volScalarField& fld, const word& where) const;
+
+    //- Check a residual value
+    void checkFiniteScalar(const scalar x,
+                           const word& name,
+                           const word& where) const;
 
 public:
     // Public Data
