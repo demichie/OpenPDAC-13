@@ -661,6 +661,18 @@ void Foam::phaseSystem::solve(const alphaControl& alphaControls,
                     mesh_,
                     dimensionedScalar(dimless, 0));
 
+                // Added clip before normalization
+                forAll(solvePhases, solvePhasei)
+                {
+                    phaseModel& phase = solvePhases[solvePhasei];
+                    volScalarField& alpha = phase;
+                    if (alphaControls.clip)
+                    {
+                        // Clip the phase-fractions between 0 and alphaMax
+                        alpha.maxMin(0, 1);
+                    }
+                }
+
                 forAll(movingPhases(), movingPhasei)
                 {
                     sumAlphaMoving += movingPhases()[movingPhasei];
