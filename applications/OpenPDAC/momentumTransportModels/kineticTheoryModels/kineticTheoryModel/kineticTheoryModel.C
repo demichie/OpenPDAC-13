@@ -472,6 +472,9 @@ void Foam::RASModels::kineticTheoryModel::correct()
         const Foam::fvConstraints& fvConstraints(
             Foam::fvConstraints::New(mesh_));
 
+        // const volScalarField ktWeight(
+        //     min(max(alpha / residualAlpha_, scalar(0)), scalar(1)));
+
         // Construct the granular temperature equation (Eq. 3.20, p. 44)
         // NB. note that there are two typos in Eq. 3.20:
         //     Ps should be without grad
@@ -486,6 +489,14 @@ void Foam::RASModels::kineticTheoryModel::correct()
                    + fvm::Sp(-gammaCoeff, Theta_) + fvm::Sp(-J1, Theta_)
                    + fvm::Sp(J2 / (Theta_ + ThetaSmall), Theta_)
                    + fvModels.source(alpha, rho, Theta_));
+        /*
+               == -fvm::SuSp(ktWeight*((PsCoeff * I) && gradU), Theta_)
+            +  ktWeight*(tau && gradU)
+            +  fvm::Sp(-ktWeight*gammaCoeff, Theta_)
+            +  fvm::Sp(-ktWeight*J1, Theta_)
+            +  fvm::Sp(ktWeight*J2/(Theta_ + ThetaSmall), Theta_)
+            +  fvModels.source(alpha, rho, Theta_));
+        */
 
         ThetaEqn.relax();
         fvConstraints.constrain(ThetaEqn);
