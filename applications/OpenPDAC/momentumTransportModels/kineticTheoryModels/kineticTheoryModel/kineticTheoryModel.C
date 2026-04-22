@@ -490,6 +490,12 @@ void Foam::RASModels::kineticTheoryModel::correct()
         ThetaEqn.relax();
         fvConstraints.constrain(ThetaEqn);
         ThetaEqn.solve();
+
+        Info << phase_.name() << " theta: avg, min, max = "
+             << Theta_.weightedAverage(mesh_.Vsc()).value() << ' '
+             << min(Theta_).value() << ' ' << max(Theta_).value() << endl;
+
+
         fvConstraints.constrain(Theta_);
     }
     else
