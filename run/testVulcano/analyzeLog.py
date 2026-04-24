@@ -591,22 +591,40 @@ def plot_pressure(df: pd.DataFrame, output_dir: Path) -> None:
         save_figure(fig, output_dir / "pressure_residuals")
 
     if df["p_min"].notna().any() or df["p_max"].notna().any():
-        fig, ax = plt.subplots(figsize=(10, 5))
+        fig, ax1 = plt.subplots(figsize=(10, 5))
+        ax2 = ax1.twinx()
+
         if df["p_min"].notna().any():
-            ax.plot(df["time"], df["p_min"], label="p min", linewidth=LINE_WIDTH)
+            ax1.plot(
+                df["time"],
+                df["p_min"],
+                label="p min",
+                linewidth=LINE_WIDTH,
+                color="tab:blue",
+                linestyle="-",
+            )
+
         if df["p_max"].notna().any():
-            ax.plot(
+            ax2.plot(
                 df["time"],
                 df["p_max"],
                 label="p max",
                 linewidth=LINE_WIDTH,
+                color="tab:red",
                 linestyle="--",
             )
-        ax.set_yscale("log")
-        ax.set_ylabel("Pressure")
-        ax.set_title("Pressure extrema")
-        apply_common_style(ax)
-        ax.legend(frameon=True)
+
+        ax1.set_yscale("log")
+        ax2.set_yscale("log")
+
+        ax1.set_ylabel("Pressure minimum")
+        ax2.set_ylabel("Pressure maximum")
+
+        ax1.set_title("Pressure extrema")
+        apply_common_style(ax1)
+        apply_dual_axis_style(ax1, ax2)
+        merge_legends(ax1, ax2)
+
         save_figure(fig, output_dir / "pressure_extrema")
 
 
