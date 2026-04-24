@@ -30,7 +30,7 @@ RAS
         multiParticles          off;
         equilibrium             off;
         e                       0.8;
-        residualAlpha           1e-4;
+        residualAlpha           1e-9;
 
         granularViscosityModel          Gidaspow;
         granularConductivityModel       Gidaspow;
