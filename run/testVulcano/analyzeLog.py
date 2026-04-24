@@ -142,6 +142,7 @@ def initialize_step(time_value: float, pending: Dict[str, Optional[float]]) -> D
         "_phase_theta": {},
         "max_pimple_iteration": 0,
         "pimple_not_converged_limit": None,
+        "first_pimple_initial_residual": None,
         "last_pimple_initial_residual": None,
         "last_pimple_residual_ratio": None,
         "bypass_count": 0,
@@ -305,7 +306,12 @@ def parse_log(log_path: Path) -> Tuple[pd.DataFrame, List[str], Optional[str]]:
 
             match = RE_PIMPLE_INITIAL_RESIDUAL.match(line)
             if match:
-                current_step["last_pimple_initial_residual"] = to_float(match.group(2))
+                residual = to_float(match.group(2))
+
+                if current_step["first_pimple_initial_residual"] is None:
+                    current_step["first_pimple_initial_residual"] = residual
+
+                current_step["last_pimple_initial_residual"] = residual
                 continue
 
             match = RE_PIMPLE_RESIDUAL_RATIO.match(line)
@@ -567,25 +573,36 @@ def plot_stability(df: pd.DataFrame, output_dir: Path) -> None:
 
 
 def plot_pressure(df: pd.DataFrame, output_dir: Path) -> None:
-    if df["p_rgh_initial_residual_last"].notna().any():
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.plot(
-            df["time"],
-            df["p_rgh_initial_residual_last"],
-            label="Last p_rgh initial residual",
-            linewidth=LINE_WIDTH,
+    if (
+        "first_pimple_initial_residual" in df.columns
+        and "last_pimple_initial_residual" in df.columns
+        and (
+            df["first_pimple_initial_residual"].notna().any()
+            or df["last_pimple_initial_residual"].notna().any()
         )
-        if df["p_rgh_initial_residual_max"].notna().any():
+    ):
+        fig, ax = plt.subplots(figsize=(10, 5))
+
+        if df["first_pimple_initial_residual"].notna().any():
             ax.plot(
                 df["time"],
-                df["p_rgh_initial_residual_max"],
-                label="Max p_rgh initial residual",
+                df["first_pimple_initial_residual"],
+                label="Initial p_rgh residual, first PIMPLE iteration",
                 linewidth=LINE_WIDTH,
                 linestyle="--",
             )
+
+        if df["last_pimple_initial_residual"].notna().any():
+            ax.plot(
+                df["time"],
+                df["last_pimple_initial_residual"],
+                label="Initial p_rgh residual, last PIMPLE iteration",
+                linewidth=LINE_WIDTH,
+            )
+
         ax.set_yscale("log")
         ax.set_ylabel("Residual [-]")
-        ax.set_title("Pressure residual diagnostics")
+        ax.set_title("Pressure convergence diagnostics")
         apply_common_style(ax)
         ax.legend(frameon=True)
         save_figure(fig, output_dir / "pressure_residuals")
@@ -626,8 +643,6 @@ def plot_pressure(df: pd.DataFrame, output_dir: Path) -> None:
         merge_legends(ax1, ax2)
 
         save_figure(fig, output_dir / "pressure_extrema")
-
-
 def plot_energy(df: pd.DataFrame, output_dir: Path, phases: List[str], energy_variable: Optional[str]) -> None:
     if energy_variable is not None:
         fig, ax = plt.subplots(figsize=(10, 5))
