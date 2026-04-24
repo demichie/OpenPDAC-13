@@ -216,7 +216,7 @@ tmp<pointField> getLaplacianTargetPoints(const fvMesh& mesh,
     }
 
     syncTools::syncPointPositions(
-        mesh, targetPoints, minOp<point>(), point(great, great, great));
+        mesh, targetPoints, minEqOp<point>(), point(great, great, great));
 
     return tTargetPoints;
 }
@@ -266,6 +266,147 @@ tmp<pointField> getCentroidalTargetPoints(const fvMesh& mesh)
         }
     }
     return tTargetPoints;
+}
+
+
+
+// =========================================================================
+// Lightweight mesh-quality metrics used by the optional quality-aware
+// Laplacian smoother.  These checks are intentionally local/simple and are
+// not meant to replace checkMesh; they only prevent the smoother from
+// accepting a Laplacian step that worsens the most common checkMesh failures.
+// =========================================================================
+
+label countConcaveCellsSimple(const fvMesh& mesh, const scalar concavityTol)
+{
+    const cellList& cells = mesh.cells();
+    const vectorField& faceAreas = mesh.faceAreas();
+    const vectorField& faceCentres = mesh.faceCentres();
+    const labelUList& owner = mesh.faceOwner();
+
+    label localConcave = 0;
+
+    forAll(cells, cellI)
+    {
+        const cell& c = cells[cellI];
+        bool isConcave = false;
+
+        forAll(c, i)
+        {
+            const label faceI = c[i];
+            vector n = faceAreas[faceI];
+
+            // faceAreas are oriented out of the owner cell.  Reverse them
+            // when this cell sees the face as a neighbour-side face.
+            if (owner[faceI] != cellI)
+            {
+                n = -n;
+            }
+
+            const scalar nMag = mag(n);
+            if (nMag <= VSMALL)
+            {
+                continue;
+            }
+            n /= nMag;
+
+            const point& fCi = faceCentres[faceI];
+
+            forAll(c, j)
+            {
+                if (j == i)
+                {
+                    continue;
+                }
+
+                const label otherFaceI = c[j];
+                const vector v = faceCentres[otherFaceI] - fCi;
+
+                if ((v & n) > concavityTol)
+                {
+                    isConcave = true;
+                    break;
+                }
+            }
+
+            if (isConcave)
+            {
+                break;
+            }
+        }
+
+        if (isConcave)
+        {
+            ++localConcave;
+        }
+    }
+
+    reduce(localConcave, sumOp<label>());
+    return localConcave;
+}
+
+
+scalar minFaceTetQualitySimple(const fvMesh& mesh)
+{
+    const pointField& pts = mesh.points();
+    const faceList& faces = mesh.faces();
+    const vectorField& cellCentres = mesh.cellCentres();
+    const vectorField& faceCentres = mesh.faceCentres();
+    const labelUList& owner = mesh.faceOwner();
+    const labelUList& neighbour = mesh.faceNeighbour();
+
+    scalar localMinQuality = GREAT;
+
+    forAll(faces, faceI)
+    {
+        const face& f = faces[faceI];
+        if (f.size() < 3)
+        {
+            continue;
+        }
+
+        const point& fC = faceCentres[faceI];
+
+        forAll(f, fp)
+        {
+            const point& p0 = pts[f[fp]];
+            const point& p1 = pts[f[(fp + 1) % f.size()]];
+            const scalar edgeLen = mag(p1 - p0);
+
+            if (edgeLen <= VSMALL)
+            {
+                localMinQuality = 0.0;
+                continue;
+            }
+
+            const vector triNormal = 0.5*((p0 - fC) ^ (p1 - fC));
+            const scalar triArea = mag(triNormal);
+
+            if (triArea <= VSMALL)
+            {
+                localMinQuality = 0.0;
+                continue;
+            }
+
+            const label ownI = owner[faceI];
+            const scalar ownHeight = mag((fC - cellCentres[ownI]) & (triNormal/triArea));
+            const scalar ownVol = triArea*ownHeight/3.0;
+            const scalar ownScale = max(pow(edgeLen, 3), VSMALL);
+            localMinQuality = min(localMinQuality, ownVol/ownScale);
+
+            if (faceI < mesh.nInternalFaces())
+            {
+                const label neiI = neighbour[faceI];
+                const scalar neiHeight = mag((fC - cellCentres[neiI]) & (triNormal/triArea));
+                const scalar neiVol = triArea*neiHeight/3.0;
+                const scalar neiScale = max(pow(edgeLen, 3), VSMALL);
+                localMinQuality = min(localMinQuality, neiVol/neiScale);
+            }
+        }
+    }
+
+    reduce(localMinQuality, minOp<scalar>());
+    return localMinQuality;
 }
 
 
@@ -1075,7 +1216,7 @@ int main(int argc, char* argv[])
             topoDict.lookupOrDefault<Switch>("saveCrop", false);
         const scalar coeffVertDeformation =
             topoDict.lookupOrDefault<scalar>("coeffVertDeformation", 1.0);
-        
+
         scalarList zNeg, dxNeg, dyNeg;
         bool useNegDeformation = true;
         // --- End original declarations ---
@@ -1927,7 +2068,7 @@ int main(int argc, char* argv[])
                         coeffHor = 1.0;
                     }
 
-                    coeffHor = Foam::pow(coeffHor,noDeformExp);
+                    coeffHor = Foam::pow(coeffHor, noDeformExp);
 
                     interpDx = DeltaInterp.x() * coeffHor;
                     interpDy = DeltaInterp.y() * coeffHor;
@@ -1986,7 +2127,7 @@ int main(int argc, char* argv[])
         // proposed by each processor that shares the point.
         // This "stitches" the mesh back together and eliminates discrepancies.
         syncTools::syncPointPositions(
-            mesh, tnewPoints.ref(), maxOp<point>(), point::zero);
+            mesh, tnewPoints.ref(), maxEqOp<point>(), point::zero);
 
         // Now that the new positions are consistent, update the mesh.
         // We use movePoints, which is more robust than setPoints for this.
@@ -2049,7 +2190,6 @@ int main(int argc, char* argv[])
         const int nSmoothIter = topoDict.lookupOrDefault<int>("nIter", 50);
         const scalar maxRotationAngleDeg =
             topoDict.lookupOrDefault<scalar>("maxRotationAngleDeg", 1.0);
-        const scalar maxRotationAngleRad = Foam::degToRad(maxRotationAngleDeg);
         const scalar qualityThresholdDeg =
             topoDict.lookupOrDefault<scalar>("stopOnQualityDeg", 85.0);
         const int laplacianFrequency =
@@ -2058,6 +2198,40 @@ int main(int argc, char* argv[])
             topoDict.lookupOrDefault<scalar>("laplacianRelaxFactor", 0.01);
         const scalar blendingFactor =
             topoDict.lookupOrDefault<scalar>("internalBlending", 0.2);
+        const Switch normalAwareNearGroundSmoothing =
+            topoDict.lookupOrDefault<Switch>(
+                "normalAwareNearGroundSmoothing", false);
+        const label normalAwareLayers =
+            topoDict.lookupOrDefault<label>("normalAwareLayers", 2);
+        const scalar normalAwareNormalRelax =
+            topoDict.lookupOrDefault<scalar>("normalAwareNormalRelax", 1.0);
+
+        const Switch qualityAwareLaplacian =
+            topoDict.lookupOrDefault<Switch>("qualityAwareLaplacian", false);
+        const Switch rejectLaplacianOnConcave =
+            topoDict.lookupOrDefault<Switch>("rejectLaplacianOnConcave", true);
+        const Switch rejectLaplacianOnLowTetQuality =
+            topoDict.lookupOrDefault<Switch>("rejectLaplacianOnLowTetQuality", true);
+        const scalar minAllowedTetQuality =
+            topoDict.lookupOrDefault<scalar>("minAllowedTetQuality", 1e-15);
+        const label maxAllowedConcaveCells =
+            topoDict.lookupOrDefault<label>("maxAllowedConcaveCells", -1);
+        const Switch laplacianBacktracking =
+            topoDict.lookupOrDefault<Switch>("laplacianBacktracking", false);
+        const scalar laplacianBacktrackingFactor =
+            topoDict.lookupOrDefault<scalar>("laplacianBacktrackingFactor", 0.5);
+        const scalar laplacianMinRelaxFactor =
+            topoDict.lookupOrDefault<scalar>("laplacianMinRelaxFactor", 0.003);
+        const scalar concavityTolerance =
+            topoDict.lookupOrDefault<scalar>("qualityAwareConcavityTolerance", SMALL);
+
+        const Switch bestStateUseQualityScore =
+            topoDict.lookupOrDefault<Switch>("bestStateUseQualityScore", false);
+        const scalar bestStateConcaveWeight =
+            topoDict.lookupOrDefault<scalar>("bestStateConcaveWeight", 0.005);
+        const scalar bestStateLowTetWeight =
+            topoDict.lookupOrDefault<scalar>("bestStateLowTetWeight", 1000.0);
+
         const scalar qualityCosThreshold =
             Foam::cos(degToRad(qualityThresholdDeg));
 
@@ -2067,6 +2241,29 @@ int main(int argc, char* argv[])
         Info << "  - Max rotation angle (deg): " << maxRotationAngleDeg << endl;
         Info << "  - Stopping when worst non-orthogonality is below "
              << qualityThresholdDeg << " degrees." << endl;
+        if (qualityAwareLaplacian)
+        {
+            Info << "  - Quality-aware Laplacian: enabled" << endl;
+            Info << "    reject on concave: " << rejectLaplacianOnConcave
+                 << ", reject on low tet quality: "
+                 << rejectLaplacianOnLowTetQuality << endl;
+            Info << "    minAllowedTetQuality: " << minAllowedTetQuality
+                 << ", maxAllowedConcaveCells: "
+                 << maxAllowedConcaveCells << endl;
+            Info << "    backtracking: " << laplacianBacktracking
+                 << ", factor: " << laplacianBacktrackingFactor
+                 << ", min relax factor: " << laplacianMinRelaxFactor
+                 << endl;
+        }
+        if (bestStateUseQualityScore)
+        {
+            Info << "  - Best-state quality score: enabled" << endl;
+            Info << "    score = maxNonOrtho[deg] + "
+                 << bestStateConcaveWeight
+                 << "*nConcave + lowTetPenalty" << endl;
+            Info << "    lowTet penalty weight: "
+                 << bestStateLowTetWeight << endl;
+        }
 
         // --- 0: Identify all boundary points that must remain fixed ---
         Info << "Identifying fixed boundary points..." << endl;
@@ -2108,6 +2305,127 @@ int main(int argc, char* argv[])
             }
         }
 
+        // --- 0b. Optional normal-aware mask for near-terrain Laplacian smoothing ---
+        // The mask is built topologically from wall patches, e.g. terrain_in/terrain_out.
+        // Points in the first normalAwareLayers layers are allowed to smooth only
+        // tangentially to the local terrain normal.
+        boolList normalAwarePoint(mesh.nPoints(), false);
+        vectorField normalAwareNormal(mesh.nPoints(), vector::zero);
+
+        if (normalAwareNearGroundSmoothing && normalAwareLayers > 0)
+        {
+            Info << "Building normal-aware smoothing mask from wall patches..."
+                 << endl;
+
+            boolList frontier(mesh.nPoints(), false);
+
+            const faceList& faces = mesh.faces();
+            const vectorField& faceAreas = mesh.faceAreas();
+
+            forAll(mesh.boundaryMesh(), patchI)
+            {
+                const polyPatch& pp = mesh.boundaryMesh()[patchI];
+
+                if (!isA<processorPolyPatch>(pp) && pp.type() == "wall")
+                {
+                    Info << "  - Using patch '" << pp.name()
+                         << "' for terrain-normal smoothing." << endl;
+
+                    forAll(pp, i)
+                    {
+                        const label faceI = pp.start() + i;
+                        vector n = faceAreas[faceI];
+
+                        if (mag(n) > VSMALL)
+                        {
+                            n /= mag(n);
+
+                            const face& f = faces[faceI];
+                            forAll(f, fp)
+                            {
+                                const label pI = f[fp];
+                                frontier[pI] = true;
+                                normalAwareNormal[pI] += n;
+                            }
+                        }
+                    }
+                }
+            }
+
+            syncTools::syncPointList(
+                mesh, frontier, orEqOp<bool>(), false);
+            syncTools::syncPointList(
+                mesh, normalAwareNormal, plusEqOp<vector>(), vector::zero);
+
+            forAll(normalAwareNormal, pI)
+            {
+                if (mag(normalAwareNormal[pI]) > VSMALL)
+                {
+                    normalAwareNormal[pI] /= mag(normalAwareNormal[pI]);
+                }
+            }
+
+            const edgeList& edges = mesh.edges();
+
+            for (label layer = 0; layer < normalAwareLayers; ++layer)
+            {
+                boolList nextFrontier(mesh.nPoints(), false);
+                vectorField nextNormal(mesh.nPoints(), vector::zero);
+
+                forAll(edges, edgeI)
+                {
+                    const edge& e = edges[edgeI];
+                    const label p0 = e[0];
+                    const label p1 = e[1];
+
+                    if (frontier[p0] && !isBoundaryPoint[p1])
+                    {
+                        normalAwarePoint[p1] = true;
+                        nextFrontier[p1] = true;
+                        nextNormal[p1] += normalAwareNormal[p0];
+                    }
+
+                    if (frontier[p1] && !isBoundaryPoint[p0])
+                    {
+                        normalAwarePoint[p0] = true;
+                        nextFrontier[p0] = true;
+                        nextNormal[p0] += normalAwareNormal[p1];
+                    }
+                }
+
+                syncTools::syncPointList(
+                    mesh, normalAwarePoint, orEqOp<bool>(), false);
+                syncTools::syncPointList(
+                    mesh, nextFrontier, orEqOp<bool>(), false);
+                syncTools::syncPointList(
+                    mesh, nextNormal, plusEqOp<vector>(), vector::zero);
+
+                forAll(nextNormal, pI)
+                {
+                    if (mag(nextNormal[pI]) > VSMALL)
+                    {
+                        nextNormal[pI] /= mag(nextNormal[pI]);
+                        normalAwareNormal[pI] = nextNormal[pI];
+                    }
+                }
+
+                frontier = nextFrontier;
+            }
+
+            label nProtected = 0;
+            forAll(normalAwarePoint, pI)
+            {
+                if (normalAwarePoint[pI])
+                {
+                    ++nProtected;
+                }
+            }
+            reduce(nProtected, sumOp<label>());
+
+            Info << "  - Normal-aware Laplacian points: " << nProtected
+                 << endl;
+        }
+
         // --- 1. Initial Calculation and Setup for Best-State Tracking ---
         mesh.clearGeom();
         tmp<scalarField> t_ortho = meshCheck::faceOrthogonality(
@@ -2124,6 +2442,23 @@ int main(int argc, char* argv[])
 
         pointField bestPoints = mesh.points();
         scalar bestMinOrtho = initialMinOrtho;
+        label bestConcaveCells = 0;
+        scalar bestMinTetQuality = GREAT;
+        scalar bestScore = Foam::radToDeg(
+            Foam::acos(max(-1.0, min(1.0, bestMinOrtho))));
+
+        if (bestStateUseQualityScore)
+        {
+            mesh.clearGeom();
+            bestConcaveCells =
+                countConcaveCellsSimple(mesh, concavityTolerance);
+            bestMinTetQuality = minFaceTetQualitySimple(mesh);
+            bestScore += bestStateConcaveWeight*bestConcaveCells;
+            if (bestMinTetQuality < minAllowedTetQuality)
+            {
+                bestScore += bestStateLowTetWeight;
+            }
+        }
 
         const scalarList normFactors = calculateEdgeNormFactors(mesh);
         const scalarList neighbourCount_points =
@@ -2189,6 +2524,10 @@ int main(int argc, char* argv[])
 
         reduce(procB, maxOp<label>());
         */
+        scalar currentMaxRotDeg = maxRotationAngleDeg;
+        scalar lastLaplacianBestMinOrtho = bestMinOrtho;
+        Info << "  Adaptive rotation enabled. Starting angle: "
+             << currentMaxRotDeg << " deg." << endl;
 
         // --- Main Hybrid Smoothing Loop ---
         for (int iter = 0; iter < nSmoothIter; ++iter)
@@ -2199,6 +2538,52 @@ int main(int argc, char* argv[])
 
             if (doLaplacianSmoothing)
             {
+
+
+                if (bestMinOrtho > lastLaplacianBestMinOrtho
+                                       + 1e-8) // Usiamo una piccola tolleranza
+                {
+                    currentMaxRotDeg *= 1.01;
+                    // CASO POSITIVO: Abbiamo fatto progressi in questo blocco
+                    // di iterazioni.
+                    if (Pstream::master())
+                    {
+                        Info << "  Iteration " << iter + 1
+                             << " - Progress detected since last Laplacian ("
+                             << lastLaplacianBestMinOrtho << " -> "
+                             << bestMinOrtho
+                             << "). Keeping max rotation: " << currentMaxRotDeg
+                             << " deg." << endl;
+                    }
+                    // Opzionale: Potresti voler ripristinare l'angolo originale
+                    // se le cose vanno bene? currentMaxRotDeg =
+                    // maxRotationAngleDeg;
+                }
+                else
+                {
+                    // CASO NEGATIVO: Nessun record battuto nell'ultimo ciclo.
+                    // Stagnazione o Deadlock. Puniamo l'algoritmo riducendo
+                    // l'angolo.
+
+                    scalar oldAngle = currentMaxRotDeg;
+                    currentMaxRotDeg *= 0.99; // Riduci del 25%
+
+                    if (currentMaxRotDeg < 1e-4)
+                        currentMaxRotDeg = 1e-4; // Limite inferiore
+
+                    if (Pstream::master())
+                    {
+                        Info << "  Iteration " << iter + 1
+                             << " - NO Progress since last Laplacian. Reducing "
+                                "max rotation: "
+                             << oldAngle << " -> " << currentMaxRotDeg
+                             << " deg." << endl;
+                    }
+                }
+
+                // 2. AGGIORNA IL CHECKPOINT PER IL PROSSIMO GIRO
+                lastLaplacianBestMinOrtho = bestMinOrtho;
+
                 // ======================================================= //
                 //             LAPLACIAN SMOOTHING ITERATION               //
                 // ======================================================= //
@@ -2258,7 +2643,7 @@ int main(int argc, char* argv[])
                 syncTools::syncPointPositions(
                     mesh,
                     const_cast<pointField&>(mesh.points()),
-                    minOp<point>(),
+                    minEqOp<point>(),
                     point(great, great, great));
                 mesh.clearGeom();
                 // --- END OF BEST MESH LOGIC ---
@@ -2322,13 +2707,29 @@ int main(int argc, char* argv[])
                         proposedDisplacement[pointI] =
                             laplacianRelaxFactor
                             * (P_ideal_blended - currentPos);
+
+                        if
+                        (
+                            normalAwareNearGroundSmoothing
+                         && normalAwarePoint[pointI]
+                         && mag(normalAwareNormal[pointI]) > VSMALL
+                        )
+                        {
+                            const vector nHat =
+                                normalAwareNormal[pointI]/mag(normalAwareNormal[pointI]);
+
+                            proposedDisplacement[pointI] -=
+                                normalAwareNormalRelax
+                               *(proposedDisplacement[pointI] & nHat)
+                               *nHat;
+                        }
                     }
                 }
 
                 // --- 4. Sync the displacements among the processors
                 syncTools::syncPointList(mesh,
                                          proposedDisplacement,
-                                         minOp<point>(),
+                                         minEqOp<point>(),
                                          point(great, great, great));
 
 
@@ -2347,14 +2748,142 @@ int main(int argc, char* argv[])
                 */
 
 
-                const_cast<pointField&>(mesh.points()) += proposedDisplacement;
+                // --- 5. Apply the Laplacian step.  Optionally reject or
+                // backtrack if the step worsens checkMesh-like quality metrics.
+                const pointField pointsBeforeLaplacian = mesh.points();
 
-                // --- 5. Sync the point coordinates among the processors
-                syncTools::syncPointPositions(
-                    mesh,
-                    const_cast<pointField&>(mesh.points()),
-                    minOp<point>(),
-                    point(great, great, great));
+                bool acceptLaplacianStep = true;
+                scalar acceptedScale = 1.0;
+
+                label oldConcaveCells = 0;
+                scalar oldMinTetQuality = GREAT;
+
+                if (qualityAwareLaplacian)
+                {
+                    mesh.clearGeom();
+                    oldConcaveCells =
+                        countConcaveCellsSimple(mesh, concavityTolerance);
+                    oldMinTetQuality = minFaceTetQualitySimple(mesh);
+                }
+
+                scalar trialScale = 1.0;
+
+                while (true)
+                {
+                    const_cast<pointField&>(mesh.points()) =
+                        pointsBeforeLaplacian + trialScale*proposedDisplacement;
+
+                    syncTools::syncPointPositions(
+                        mesh,
+                        const_cast<pointField&>(mesh.points()),
+                        minEqOp<point>(),
+                        point(great, great, great));
+
+                    if (!qualityAwareLaplacian)
+                    {
+                        acceptLaplacianStep = true;
+                        acceptedScale = trialScale;
+                        break;
+                    }
+
+                    mesh.clearGeom();
+                    const label newConcaveCells =
+                        countConcaveCellsSimple(mesh, concavityTolerance);
+                    const scalar newMinTetQuality = minFaceTetQualitySimple(mesh);
+
+                    bool badStep = false;
+
+                    if
+                    (
+                        rejectLaplacianOnConcave
+                     && newConcaveCells > oldConcaveCells
+                    )
+                    {
+                        badStep = true;
+                    }
+
+                    if
+                    (
+                        rejectLaplacianOnConcave
+                     && maxAllowedConcaveCells >= 0
+                     && newConcaveCells > maxAllowedConcaveCells
+                    )
+                    {
+                        badStep = true;
+                    }
+
+                    if
+                    (
+                        rejectLaplacianOnLowTetQuality
+                     && newMinTetQuality < minAllowedTetQuality
+                    )
+                    {
+                        badStep = true;
+                    }
+
+                    if (!badStep)
+                    {
+                        acceptLaplacianStep = true;
+                        acceptedScale = trialScale;
+
+                        if (Pstream::master())
+                        {
+                            Info << "    - Accepted quality-aware Laplacian"
+                                 << " scale " << acceptedScale
+                                 << ": concave " << oldConcaveCells
+                                 << " -> " << newConcaveCells
+                                 << ", minTetQuality " << oldMinTetQuality
+                                 << " -> " << newMinTetQuality << endl;
+                        }
+                        break;
+                    }
+
+                    if
+                    (
+                        laplacianBacktracking
+                     && trialScale*laplacianRelaxFactor
+                        > laplacianMinRelaxFactor + SMALL
+                    )
+                    {
+                        if (Pstream::master())
+                        {
+                            Info << "    - Rejecting Laplacian trial scale "
+                                 << trialScale
+                                 << ": concave " << oldConcaveCells
+                                 << " -> " << newConcaveCells
+                                 << ", minTetQuality " << oldMinTetQuality
+                                 << " -> " << newMinTetQuality
+                                 << ". Backtracking." << endl;
+                        }
+
+                        trialScale *= laplacianBacktrackingFactor;
+                        continue;
+                    }
+
+                    acceptLaplacianStep = false;
+
+                    if (Pstream::master())
+                    {
+                        Info << "    - Rejected quality-aware Laplacian"
+                             << ": concave " << oldConcaveCells
+                             << " -> " << newConcaveCells
+                             << ", minTetQuality " << oldMinTetQuality
+                             << " -> " << newMinTetQuality << endl;
+                    }
+                    break;
+                }
+
+                if (!acceptLaplacianStep)
+                {
+                    const_cast<pointField&>(mesh.points()) =
+                        pointsBeforeLaplacian;
+
+                    syncTools::syncPointPositions(
+                        mesh,
+                        const_cast<pointField&>(mesh.points()),
+                        minEqOp<point>(),
+                        point(great, great, great));
+                }
             }
             else
             {
@@ -2489,8 +3018,14 @@ int main(int argc, char* argv[])
                             {
                                 scalar totalCorrectionAngle =
                                     Foam::acos(max(-1.0, min(1.0, cosAngle)));
-                                scalar rotationStepAngle = min(
-                                    totalCorrectionAngle, maxRotationAngleRad);
+                                scalar currentMaxRotRad =
+                                    Foam::degToRad(currentMaxRotDeg);
+                                scalar rotationStepAngle =
+                                    min(totalCorrectionAngle, currentMaxRotRad);
+
+                                // scalar rotationStepAngle = min(
+                                //     totalCorrectionAngle,
+                                //     maxRotationAngleRad);
                                 quaternion R(normalised(axis),
                                              rotationStepAngle);
 
@@ -2527,7 +3062,7 @@ int main(int argc, char* argv[])
                 syncTools::syncPointPositions(
                     mesh,
                     const_cast<pointField&>(mesh.points()),
-                    minOp<point>(),
+                    minEqOp<point>(),
                     point(great, great, great));
             }
 
@@ -2549,24 +3084,68 @@ int main(int argc, char* argv[])
             scalar currentMinOrtho = localMinOrthoForBestMesh;
             reduce(currentMinOrtho, minOp<scalar>());
 
-            if (currentMinOrtho > bestMinOrtho)
+            const scalar currentMaxNonOrthoDeg = Foam::radToDeg(
+                Foam::acos(max(-1.0, min(1.0, currentMinOrtho))));
+
+            bool currentIsBest = false;
+
+            if (bestStateUseQualityScore)
+            {
+                mesh.clearGeom();
+                const label currentConcaveCells =
+                    countConcaveCellsSimple(mesh, concavityTolerance);
+                const scalar currentMinTetQuality =
+                    minFaceTetQualitySimple(mesh);
+
+                scalar currentScore = currentMaxNonOrthoDeg
+                    + bestStateConcaveWeight*currentConcaveCells;
+
+                if (currentMinTetQuality < minAllowedTetQuality)
+                {
+                    currentScore += bestStateLowTetWeight;
+                }
+
+                if (currentScore < bestScore)
+                {
+                    currentIsBest = true;
+                    bestScore = currentScore;
+                    bestConcaveCells = currentConcaveCells;
+                    bestMinTetQuality = currentMinTetQuality;
+                }
+            }
+            else if (currentMinOrtho > bestMinOrtho)
+            {
+                currentIsBest = true;
+            }
+
+            if (currentIsBest)
             {
                 bestMinOrtho = currentMinOrtho;
                 bestPoints = mesh.points();
                 if (Pstream::master())
                 {
-                    scalar bestAngle = Foam::radToDeg(
-                        Foam::acos(max(-1.0, min(1.0, bestMinOrtho))));
-                    Info << "    - New best mesh quality found at iteration "
-                         << iter + 1 << ": " << bestAngle << " deg." << endl;
+                    if (bestStateUseQualityScore)
+                    {
+                        Info << "    - New best mesh quality score found at iteration "
+                             << iter + 1
+                             << ": score " << bestScore
+                             << ", nonOrtho " << currentMaxNonOrthoDeg
+                             << " deg, concave " << bestConcaveCells
+                             << ", minTetQuality " << bestMinTetQuality
+                             << endl;
+                    }
+                    else
+                    {
+                        Info << "    - New best mesh quality found at iteration "
+                             << iter + 1 << ": "
+                             << currentMaxNonOrthoDeg << " deg." << endl;
+                    }
                 }
             }
             else
             {
-                // Info << "currentMinOrtho " << currentMinOrtho << endl;
                 Info << "curretnMaxAngle "
-                     << Foam::radToDeg(
-                            Foam::acos(max(-1.0, min(1.0, currentMinOrtho))))
+                     << currentMaxNonOrthoDeg
                      << " deg." << endl;
             }
             // --- END OF BEST MESH LOGIC ---
@@ -2578,7 +3157,7 @@ int main(int argc, char* argv[])
         const_cast<pointField&>(mesh.points()) = bestPoints;
         syncTools::syncPointPositions(mesh,
                                       const_cast<pointField&>(mesh.points()),
-                                      minOp<point>(),
+                                      minEqOp<point>(),
                                       point(great, great, great));
         mesh.clearGeom();
 
@@ -2589,6 +3168,13 @@ int main(int argc, char* argv[])
             Info << "Restored mesh to best configuration with worst "
                     "non-orthogonality: "
                  << finalBestAngle << " deg." << endl;
+            if (bestStateUseQualityScore)
+            {
+                Info << "Best-state score: " << bestScore
+                     << ", concave cells: " << bestConcaveCells
+                     << ", minTetQuality: " << bestMinTetQuality
+                     << endl;
+            }
         }
         // --- END OF BEST MESH LOGIC ---
     }
