@@ -138,23 +138,19 @@ void Foam::solvers::OpenPDAC::correctCoNum()
         */
     }
 
+    scalar appliedCorrectionFactor = 1.0;
+
     if (lowPressureTimestepCorrection)
     {
-        volScalarField alphasMax = fluid_.alfasMax();
-        const word& continuousPhaseName = fluid.continuousPhaseName();
-        volScalarField alfaCont = fluid.phases()[continuousPhaseName];
-
-        scalarField alfa_ratio =
-            pow(max(0 * alphasMax, alphasMax - alfaCont) / alphasMax, 0.5);
-
         Info << "p_ratio = " << p_ratio << endl;
-        Info << "alfa_ratio: min = " << min(alfa_ratio) << endl;
+        appliedCorrectionFactor *= p_ratio;
         sumPhi /= sqrt(p_ratio);
     }
 
     if (tempOscillationControl_ && tempOscillationFactor_ < 1.0)
     {
         Info << "tempOscillationFactor = " << tempOscillationFactor_ << endl;
+        appliedCorrectionFactor *= tempOscillationFactor_;
         sumPhi /= sqrt(tempOscillationFactor_);
     }
 
@@ -166,16 +162,23 @@ void Foam::solvers::OpenPDAC::correctCoNum()
                            * (gSum(sumPhi) / gSum(mesh.V().primitiveField()))
                            * runTime.deltaTValue();
 
-    if (lowPressureTimestepCorrection)
+    const bool modifiedTimestep = appliedCorrectionFactor < 1.0;
+
+    if (modifiedTimestep)
     {
-        Info << "Courant Number mean: " << meanCoNum * sqrt(p_ratio)
-             << " max: " << CoNum * sqrt(p_ratio) << endl;
+        const scalar sqrtAppliedCorrectionFactor =
+            sqrt(appliedCorrectionFactor);
+
+        Info << "Courant Number mean: "
+             << meanCoNum * sqrtAppliedCorrectionFactor
+             << " max: " << CoNum_ * sqrtAppliedCorrectionFactor << endl;
+
         Info << "Modified Courant Number mean: " << meanCoNum
-             << " max: " << CoNum << endl;
+             << " max: " << CoNum_ << endl;
     }
     else
     {
-        Info << "Courant Number mean: " << meanCoNum << " max: " << CoNum
+        Info << "Courant Number mean: " << meanCoNum << " max: " << CoNum_
              << endl;
     }
 }
