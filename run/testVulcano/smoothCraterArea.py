@@ -3,6 +3,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 import re
+import argparse
+import sys
 
 
 def read_openfoam_dict(file_path):
@@ -31,10 +33,7 @@ def read_asc_with_pandas(filepath):
             header[key] = float(value) if '.' in value else int(value)
 
     # Read the grid data as a pandas DataFrame
-    data = pd.read_csv(filepath,
-                       skiprows=6,
-                       header=None,
-                       sep='\s+')
+    data = pd.read_csv(filepath, skiprows=6, header=None, sep=r'\s+')
     return data.values, header
 
 
@@ -62,10 +61,8 @@ def replace_area_with_interpolation(data, x, y, radius, header):
 
     # Identify points within the circular area
     mask = ((x_coords - x)**2 + (y_coords - y)**2) <= (radius)**2
-    border_mask = ((x_coords - x)**2 +
-                   (y_coords - y)**2 > radius**2) & (((x_coords - x)**2 +
-                                                      (y_coords - y)**2 <=
-                                                      (radius + cellsize)**2))
+    border_mask = ((x_coords - x)**2 + (y_coords - y)**2 > radius**2) & ((
+        (x_coords - x)**2 + (y_coords - y)**2 <= (radius + cellsize)**2))
 
     # Extract border points for interpolation
     border_x = x_coords[border_mask]
@@ -129,16 +126,35 @@ def plot_modified_points_3d(data,
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Smooth the crater area in an ASCII DEM raster.")
+    parser.add_argument(
+        "input_asc",
+        nargs="?",
+        default="dsm_vulc_5m.asc",
+        help=("Input ASCII raster file name. If only the file name is given, "
+              "it is searched in ./constant/DEM/. Default: dsm_vulc_5m.asc"),
+    )
+    args = parser.parse_args()
+
     # Input and output file paths
-    
     DEM_path = "./constant/DEM/"
-    input_asc = "dsm_vulc_5m.asc"
+    input_asc = args.input_asc
     output_asc = "output_file.asc"
     output_plot = "modified_points.png"
-        
-    input_path = os.path.join(DEM_path,input_asc)
-    output_path = os.path.join(DEM_path,output_asc)
-    plot_path = os.path.join(DEM_path,output_plot)
+
+    input_path = (input_asc if os.path.isabs(input_asc)
+                  or os.path.dirname(input_asc) else os.path.join(
+                      DEM_path, input_asc))
+    output_path = os.path.join(DEM_path, output_asc)
+    plot_path = os.path.join(DEM_path, output_plot)
+
+    if not os.path.isfile(input_path):
+        print(
+            f"ERROR: input ASCII DEM file not found: {input_path}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     # Percorsi dei file
     geometry_file = os.path.join("constant", "geometryParameters")

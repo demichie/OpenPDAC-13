@@ -11,7 +11,8 @@
 #
 # After running, you can inspect the mesh quality and view it in ParaView.
 #
-# Usage: ./01_run_meshing.sh
+# Usage: ./01_run_meshing.sh [DEM_ASC_FILE]
+# Example: ./01_run_meshing.sh dsm_vulc_5m.asc
 # =============================================================================
 
 # Change to the script's directory for robust execution
@@ -34,12 +35,20 @@ conda activate OpenPDACconda
 
 # --- MESHING ---
 
+# Name of the ASCII DEM file used by smoothCraterArea.py.
+# If not provided, keep the previous default.
+INPUT_ASC="${1:-dsm_vulc_5m.asc}"
+
 echo "--> Cleaning the case from previous runs..."
 # Use the Allclean script to ensure a fresh start
 ./Allclean
 
-echo "--> Running Python script for geometry preparation..."
-python3 smoothCraterArea.py > log.smoothCreaterArea
+echo "--> Running Python script for geometry preparation with DEM: ${INPUT_ASC}"
+if ! python3 smoothCraterArea.py "${INPUT_ASC}" > log.smoothCreaterArea; then
+    echo "ERROR: smoothCraterArea.py failed. Check that the DEM file exists in ./constant/DEM/ or pass a valid path." >&2
+    conda deactivate
+    exit 1
+fi
 
 cp ./system/controlDict.init ./system/controlDict
 
