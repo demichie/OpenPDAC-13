@@ -14,7 +14,7 @@ dx_crater_base      0.0;
 dy_crater_base      0.0;
 
 // Conduit parameters
-h_conduit           100.0;      // Length of conduit in meters (0-> no conduit)
+h_conduit           0.0;      // Length of conduit in meters (0-> no conduit)
 r_conduit_base      10;    // Radius of the conduit base in meters
 dx_conduit_base     0.0;
 dy_conduit_base     0.0;
