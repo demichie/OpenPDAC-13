@@ -65,6 +65,11 @@ echo "--> Generating isosurface plots with plotIso.py..."
 # (--np) matches a relevant setting for your case or script logic.
 python3 plotIso.py --np 10 --fr 10 --ps 50 > log.plotiso
 
+# --- TASK 4: GENERATE VTK SERIES ---
+
+echo "--> Generating VTK Series for Paraview..."
+foamVTKSeries
+python3 VTKballistics_series.py
 
 # =========================================================================
 # Deactivate the Conda environment
