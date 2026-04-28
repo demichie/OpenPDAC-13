@@ -32,6 +32,10 @@ echo "--> Starting the main simulation in parallel with $(getApplication)..."
 # This command will block until the simulation is finished.
 runParallel $(getApplication)
 
+echo "--> Analyzing log file with python script..."
+# This command create images in folder log_analysis
+python3 analyzeLog.py log.foamRun
+
 # -----------------------------------------------------------------------------
 echo
 echo "SIMULATION SCRIPT COMPLETE."
