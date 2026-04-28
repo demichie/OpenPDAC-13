@@ -9,6 +9,7 @@ cleanCase
 
 # Explicitly remove the '0' directory
 rm -rf 0
+rm -rf log_analysis
 rm constant/DEM/output_file.asc
 rm constant/DEM/modified_points.png
 
