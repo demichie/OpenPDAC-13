@@ -100,7 +100,11 @@ RE_ENERGY_CHECK = re.compile(
     r"^Iteration ([0-9]+) Check for initial Energy Residual (true|false)$"
 )
 RE_CONVERGENCE_FLAG = re.compile(r"^convergenceFlag = (true|false)$")
-
+RE_PHASE_MIN_TEMP_OSCILLATION = re.compile(
+    r"^Phase ([A-Za-z0-9_]+) minTemp oscillation: ([0-9Ee+\-\.]+) "
+    r"\(min: ([0-9Ee+\-\.]+), max: ([0-9Ee+\-\.]+), "
+    r"avg: ([0-9Ee+\-\.]+)\)$"
+)
 
 def to_float(text: str) -> float:
     return float(text)
@@ -153,6 +157,7 @@ def initialize_step(time_value: float, pending: Dict[str, Optional[float]]) -> D
         "_p_rgh_initial_residuals": [],
         "_p_rgh_final_residuals": [],
         "_phase_temperature": {},
+        "_phase_min_temp_oscillation": {},
         "_phase_fraction": {},
         "_phase_fraction_after_clip": {},
         "_scalar_initial_residuals": {},
@@ -188,6 +193,7 @@ def finalize_step(step: Dict[str, object]) -> Dict[str, object]:
     p_rgh_initial = flat.pop("_p_rgh_initial_residuals")
     p_rgh_final = flat.pop("_p_rgh_final_residuals")
     phase_temperature = flat.pop("_phase_temperature")
+    phase_min_temp_oscillation = flat.pop("_phase_min_temp_oscillation")
     phase_fraction = flat.pop("_phase_fraction")
     phase_fraction_after_clip = flat.pop("_phase_fraction_after_clip")
     phase_theta = flat.pop("_phase_theta")
@@ -204,6 +210,13 @@ def finalize_step(step: Dict[str, object]) -> Dict[str, object]:
         token = sanitize(phase)
         flat[f"{token}_t_min"] = values.get("min")
         flat[f"{token}_t_max"] = values.get("max")
+
+    for phase, values in phase_min_temp_oscillation.items():
+        token = sanitize(phase)
+        flat[f"{token}_min_temp_oscillation"] = values.get("oscillation")
+        flat[f"{token}_min_temp_oscillation_min"] = values.get("min")
+        flat[f"{token}_min_temp_oscillation_max"] = values.get("max")
+        flat[f"{token}_min_temp_oscillation_avg"] = values.get("avg")
 
     for phase, values in phase_fraction.items():
         token = sanitize(phase)
@@ -401,6 +414,19 @@ def parse_log(log_path: Path) -> Tuple[pd.DataFrame, List[str], Optional[str]]:
             match = RE_CONVERGENCE_FLAG.match(line)
             if match:
                 current_step["last_convergence_flag"] = match.group(1) == "true"
+                continue
+
+            match = RE_PHASE_MIN_TEMP_OSCILLATION.match(line)
+            if match:
+                phase = match.group(1)
+                phases.add(phase)
+                oscillation_map = ensure_nested(
+                    current_step["_phase_min_temp_oscillation"], phase
+                )
+                oscillation_map["oscillation"] = to_float(match.group(2))
+                oscillation_map["min"] = to_float(match.group(3))
+                oscillation_map["max"] = to_float(match.group(4))
+                oscillation_map["avg"] = to_float(match.group(5))
                 continue
 
             match = RE_SCALAR_INITIAL.match(line)
@@ -725,6 +751,77 @@ def plot_energy(df: pd.DataFrame, output_dir: Path, phases: List[str], energy_va
         save_figure(fig, output_dir / "energy_temperature_extrema")
 
 
+
+def plot_min_temp_oscillations(df: pd.DataFrame, output_dir: Path, phases: List[str]) -> None:
+    """Plot phase-wise minimum-temperature oscillations over physical time."""
+    oscillation_columns = [f"{sanitize(phase)}_min_temp_oscillation" for phase in phases]
+    has_oscillations = any(
+        column in df.columns and df[column].notna().any()
+        for column in oscillation_columns
+    )
+
+    if not has_oscillations:
+        return
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    styles = phase_styles(phases, "tab10", 0.0, 1.0)
+    plotted = False
+
+    for phase in phases:
+        token = sanitize(phase)
+        column = f"{token}_min_temp_oscillation"
+        if column in df.columns and df[column].notna().any():
+            style = styles[phase]
+            ax.plot(
+                df["time"],
+                df[column],
+                label=f"{phase} min(T) oscillation",
+                linewidth=LINE_WIDTH,
+                color=style["color"],
+                linestyle=style["linestyle"],
+            )
+            plotted = True
+
+    if plotted:
+        ax.set_yscale("log")
+        ax.set_ylabel("Relative oscillation [-]")
+        ax.set_title("Minimum-temperature oscillations during PIMPLE iterations")
+        apply_common_style(ax)
+        ax.legend(frameon=True, ncol=2)
+        save_figure(fig, output_dir / "energy_min_temp_oscillations")
+    else:
+        plt.close(fig)
+
+    # Companion plots: the min/max/avg values used to compute the oscillation.
+    # One file per phase keeps the figures readable for multi-phase runs.
+    for phase in phases:
+        token = sanitize(phase)
+        phase_columns = {
+            "min": f"{token}_min_temp_oscillation_min",
+            "max": f"{token}_min_temp_oscillation_max",
+            "avg": f"{token}_min_temp_oscillation_avg",
+        }
+        if not any(
+            column in df.columns and df[column].notna().any()
+            for column in phase_columns.values()
+        ):
+            continue
+
+        fig, ax = plt.subplots(figsize=(10, 5))
+        for label, column in phase_columns.items():
+            if column in df.columns and df[column].notna().any():
+                ax.plot(
+                    df["time"],
+                    df[column],
+                    label=f"{phase} minTemp {label}",
+                    linewidth=LINE_WIDTH,
+                )
+
+        ax.set_ylabel("Temperature [K]")
+        ax.set_title(f"{phase} minimum-temperature statistics during PIMPLE iterations")
+        apply_common_style(ax)
+        ax.legend(frameon=True)
+        save_figure(fig, output_dir / f"energy_min_temp_stats_{token}")
 def plot_volume_fractions(df: pd.DataFrame, output_dir: Path, phases: List[str]) -> None:
     fig, ax = plt.subplots(figsize=(10, 5))
     plotted = False
@@ -893,6 +990,7 @@ def make_all_plots(df: pd.DataFrame, output_dir: Path, phases: List[str], energy
     plot_stability(df, output_dir)
     plot_pressure(df, output_dir)
     plot_energy(df, output_dir, phases, energy_variable)
+    plot_min_temp_oscillations(df, output_dir, phases)
     plot_volume_fractions(df, output_dir, phases)
     plot_pimple(df, output_dir)
 
