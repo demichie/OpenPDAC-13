@@ -26,6 +26,8 @@ codeInclude
     code #
 {
 
+    scalar ringCoeff = 1.1;
+
     const Foam::scalarList& atmCells_aspect_ratio_bottom =
         dict.lookup("atmCells_aspect_ratio_bottom");
     const Foam::scalarList& atmCells_aspect_ratio_top =
@@ -44,7 +46,7 @@ codeInclude
     scalar dz_top = $hor_cell_size_topo * c_top;
 
     scalar zlayer_rel = 0.0;
-
+    
     for (label layer = 0; layer <= $n_vert_layers-2; ++layer)
     {
         label N = round( Foam::log(dz_top/dz_bottom) / Foam::log(delta_z));
@@ -261,7 +263,7 @@ codeInclude
     scalar hor_cell_size_top_atm($hor_cell_size_topo * n_mult);
 
     // --- Basic Calculations ---
-    scalar radAngle = degToRad($degAngle); // 45 deg
+    scalar radAngle = degToRad(45);
     scalar conduit_base_z = -1.0 * ($h_conduit + $h_crater);
     scalar crater_base_z = -1.0 * $h_crater;
 
@@ -573,7 +575,7 @@ codeInclude
         L_condBase_center = addVertex(vector(dx, dy, z), "CrBase Ctr");
         makeRing(L_condBase_oct_Start,
                  0.5 * r_cond_base,
-                 $coeff * cos(radAngle) * 0.5 * r_cond_base,
+                 ringCoeff * cos(radAngle) * 0.5 * r_cond_base,
                  z,
                  dx,
                  dy,
@@ -598,7 +600,7 @@ codeInclude
         Info << "vertexCount " << vertexCount << endl;
         makeRing(L_crBase_oct_Start,
                  0.5 * r_cr_base,
-                 $coeff * cos(radAngle) * 0.5 * r_cr_base,
+                 ringCoeff * cos(radAngle) * 0.5 * r_cr_base,
                  z,
                  dx,
                  dy,
@@ -671,7 +673,7 @@ codeInclude
             vector(dx, dy, z_level), "L" + Foam::name(layer) + " Btm Ctr");
         makeRing(L_bottom_oct_Start[listIdxBottom],
                  0.5 * r_cr_top,
-                 $coeff * cos(radAngle) * 0.5 * r_cr_top,
+                 ringCoeff * cos(radAngle) * 0.5 * r_cr_top,
                  z_level,
                  dx,
                  dy,
@@ -770,7 +772,7 @@ codeInclude
             vector(dx, dy, z_level), "L" + Foam::name(layer) + " Top Ctr");
         makeRing(L_oct_Start[listIdxTop],
                  0.5 * r_cr_top,
-                 $coeff * cos(radAngle) * 0.5 * r_cr_top,
+                 ringCoeff * cos(radAngle) * 0.5 * r_cr_top,
                  z_level,
                  dx,
                  dy,
@@ -1379,9 +1381,9 @@ codeInclude
             // Angle of vertex i (N=0, NW=1...) CCW from East is 90 + i*45
             // degrees.
             scalar angle_v_start_deg =
-                90.0 + i * $degAngle; // $degAngle is 45.0
+                90.0 + i * 45; 
             scalar angle_mid_deg = angle_v_start_deg
-                + $degAngleHalf; // Add 22.5 deg CCW for midpoint
+                + 22.5; // Add 22.5 deg CCW for midpoint
             scalar angle_mid_rad = degToRad(angle_mid_deg);
 
             // Calculate midpoint coordinates

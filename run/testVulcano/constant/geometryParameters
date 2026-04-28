@@ -14,7 +14,7 @@ dx_crater_base      0.0;
 dy_crater_base      0.0;
 
 // Conduit parameters
-h_conduit           100.0;      // Length of conduit in meters (0-> no conduit)
+h_conduit           0.0;      // Length of conduit in meters (0-> no conduit)
 r_conduit_base      10;    // Radius of the conduit base in meters
 dx_conduit_base     0.0;
 dy_conduit_base     0.0;
@@ -26,26 +26,25 @@ atm_y_pos           1500.0;   // Horizontal extension of the front part of atmos
 atm_y_neg           -1500.0;  // Horizontal extension of the back part of atmospheric domain in meters
 atm_x_neg           -2000.0;  // Horizontal extension of the left part of atmospheric domain in meters
 
-n_vert_layers       4;        // number of layers in the atmosphere
+hor_cell_size_topo  10;   // horizontal cell size on the topography (far from the crater)
 
-hor_cell_size_topo  10;   // horizontal cell size at the top of the atmopshere block
-
-crater_cell_size   5;
-
-dz_to_dxy_crater_ratio 1.0;   // aspect-ratio of cells at the top of the crater/base of atmosphere
-dz_to_dxy_atm_ratio    2.0;   // aspect-ratio of cells at the top of the bottom layer
+crater_cell_size   5;    // gorizontal cell size at the top of the crater
 
 dz_ratio 1.2;    // vertical-size ratio between consecutive cells
 
 // Atmospheric layers parameters
+n_vert_layers       4;        // number of layers in the atmosphere
+
+// vertical to horizontal aspect ratio of cells at the bottom of each layer
+// for the first layer the horizontal size is that of the crater
 atmCells_aspect_ratio_bottom List<scalar> (1.0 1.0 1.0 1.0);
+
+// vertical to horizontal aspect ratio of cells at the top of each layer
 atmCells_aspect_ratio_top   List<scalar> (2.0 2.0 2.0 1.0);
 
 // factor for inner region enlargment from bottom to top of each layer
 exp_fact          2.0;
 
 // Fixed parameters
-crater_top_z        0.0;      // position of the crater top
-degAngle            45.0;
-degAngleHalf        22.5;
-coeff               1.1;      // Parameter for the shape of the octagon
+crater_top_z        0.0;      // elevation of the crater top in the block mesh
+
