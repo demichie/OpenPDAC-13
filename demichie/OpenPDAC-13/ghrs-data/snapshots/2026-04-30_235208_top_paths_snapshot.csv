@@ -1,0 +1,11 @@
+url_path,views_total,views_unique
+/demichie/OpenPDAC-13/tree/main/run/testVulcano,17,3
+/demichie/OpenPDAC-13/tree/main,13,6
+/demichie/OpenPDAC-13/tree/main/run/testVulcano/system,13,3
+/demichie/OpenPDAC-13/tree/main/run,8,5
+/demichie/OpenPDAC-13,7,3
+/demichie/OpenPDAC-13/tree/main/run/testVulcano/constant,6,3
+/demichie/OpenPDAC-13/tree/main/applications,4,2
+/demichie/OpenPDAC-13/blob/main/run/testVulcano/system/fvSchemes,2,2
+/demichie/OpenPDAC-13/blob/main/run/testVulcano/system/topoGridDict,2,2
+/demichie/OpenPDAC-13/blob/main/run/testVulcano/01_run_meshing.sh,2,1
