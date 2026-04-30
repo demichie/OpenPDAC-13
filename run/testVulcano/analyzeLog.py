@@ -73,6 +73,7 @@ RE_SCALAR_INITIAL = re.compile(
 )
 
 RE_P_MIN_MAX = re.compile(r"^p, min, max = ([0-9Ee+\-\.]+) ([0-9Ee+\-\.]+)$")
+RE_P_RATIO = re.compile(r"^p_ratio = ([0-9Ee+\-\.]+)$")
 RE_PHASE_T = re.compile(
     r"^([A-Za-z0-9_]+) min/max T ([0-9Ee+\-\.]+) - ([0-9Ee+\-\.]+)$"
 )
@@ -106,31 +107,95 @@ RE_PHASE_MIN_TEMP_OSCILLATION = re.compile(
     r"avg: ([0-9Ee+\-\.]+)\)$"
 )
 
+
 def to_float(text: str) -> float:
+    """Convert a numeric string from the log to a float.
+
+    Args:
+        text: Numeric string, including optional scientific notation.
+
+    Returns:
+        The parsed floating-point value.
+    """
     return float(text)
 
 
 def safe_last(values: List[float]) -> Optional[float]:
+    """Return the last value of a list, or None for an empty list.
+
+    Args:
+        values: Sequence of floating-point values collected in one time step.
+
+    Returns:
+        The last value, or None when the input list is empty.
+    """
     return values[-1] if values else None
 
 
 def safe_min(values: List[float]) -> Optional[float]:
+    """Return the minimum value of a list, or None for an empty list.
+
+    Args:
+        values: Sequence of floating-point values collected in one time step.
+
+    Returns:
+        The minimum value, or None when the input list is empty.
+    """
     return min(values) if values else None
 
 
 def safe_max(values: List[float]) -> Optional[float]:
+    """Return the maximum value of a list, or None for an empty list.
+
+    Args:
+        values: Sequence of floating-point values collected in one time step.
+
+    Returns:
+        The maximum value, or None when the input list is empty.
+    """
     return max(values) if values else None
 
 
 def rolling_mean(series: pd.Series, window: int) -> pd.Series:
+    """Compute a centered rolling mean with relaxed edge handling.
+
+    Args:
+        series: Input pandas series.
+        window: Number of samples in the moving window.
+
+    Returns:
+        A pandas series with the centered rolling mean.
+    """
     return series.rolling(window=window, min_periods=1, center=True).mean()
 
 
 def sanitize(name: str) -> str:
+    """Convert a log token into a safe lowercase column-name token.
+
+    Args:
+        name: Raw phase or variable name.
+
+    Returns:
+        A sanitized token suitable for CSV column names and file names.
+    """
     return re.sub(r"[^A-Za-z0-9_]+", "_", name).strip("_").lower()
 
 
-def initialize_step(time_value: float, pending: Dict[str, Optional[float]]) -> Dict[str, object]:
+def initialize_step(
+    time_value: float,
+    pending: Dict[str, Optional[float]],
+) -> Dict[str, object]:
+    """Create the dictionary that stores data for one physical time step.
+
+    Args:
+        time_value: Physical simulation time read from the ``Time =`` line.
+        pending: Values read before the new time-step marker, such as
+            execution time, clock time, Courant number, and deltaT.
+
+    Returns:
+        A mutable dictionary initialized with scalar fields and internal
+        nested containers used during parsing.
+    """
     return {
         "time": time_value,
         "execution_time_s": pending.get("execution_time_s"),
@@ -139,6 +204,7 @@ def initialize_step(time_value: float, pending: Dict[str, Optional[float]]) -> D
         "delta_t": pending.get("delta_t"),
         "p_min": None,
         "p_max": None,
+        "last_p_ratio": None,
         "packing_proximity_avg": None,
         "packing_proximity_min": None,
         "packing_proximity_max": None,
@@ -154,6 +220,7 @@ def initialize_step(time_value: float, pending: Dict[str, Optional[float]]) -> D
         "last_energy_check_iteration": None,
         "last_energy_check_success": None,
         "last_convergence_flag": None,
+        "_current_pimple_iteration": None,
         "_p_rgh_initial_residuals": [],
         "_p_rgh_final_residuals": [],
         "_phase_temperature": {},
@@ -162,6 +229,7 @@ def initialize_step(time_value: float, pending: Dict[str, Optional[float]]) -> D
         "_phase_fraction_after_clip": {},
         "_scalar_initial_residuals": {},
         "_scalar_linear_iterations": {},
+        "_energy_initial_residuals_by_pimple": {},
     }
 
 
@@ -170,6 +238,16 @@ def ensure_nested(
     key: str,
     default: Optional[Dict[str, object]] = None,
 ) -> Dict[str, object]:
+    """Return a nested dictionary, creating it if necessary.
+
+    Args:
+        container: Parent dictionary indexed by a group key.
+        key: Name of the nested dictionary to return.
+        default: Optional template used when the nested dictionary is created.
+
+    Returns:
+        The nested dictionary associated with ``key``.
+    """
     if key not in container:
         container[key] = {} if default is None else default.copy()
     return container[key]
@@ -180,6 +258,16 @@ def ensure_list_nested(
     group: str,
     item: str,
 ) -> List[float]:
+    """Return a nested list, creating intermediate dictionaries as needed.
+
+    Args:
+        container: Parent dictionary indexed first by variable and then by phase.
+        group: First-level key, usually the equation or variable name.
+        item: Second-level key, usually the phase name.
+
+    Returns:
+        The list associated with ``container[group][item]``.
+    """
     if group not in container:
         container[group] = {}
     if item not in container[group]:
@@ -187,7 +275,50 @@ def ensure_list_nested(
     return container[group][item]
 
 
+def append_energy_pimple_residual(
+    container: Dict[str, Dict[str, Dict[int, List[float]]]],
+    variable: str,
+    phase: str,
+    pimple_iteration: Optional[int],
+    residual: float,
+) -> None:
+    """Store one energy-equation initial residual by PIMPLE iteration.
+
+    The diagnostic is based on linear-solver lines of the form
+    ``Solving for h.phase`` or ``Solving for e.phase``. Residuals are
+    grouped by energy variable, phase, and the current outer PIMPLE
+    iteration. This makes it possible to distinguish the first energy
+    solve of the first PIMPLE iteration, the first energy solve of the
+    last PIMPLE iteration, and the last energy solve in the time step.
+
+    Args:
+        container: Nested dictionary updated in place.
+        variable: Energy variable name, normally ``h`` or ``e``.
+        phase: Phase name associated with the energy equation.
+        pimple_iteration: Current PIMPLE iteration number. When no PIMPLE
+            marker has been seen, the value is stored under 0.
+        residual: Initial residual reported by the linear solver.
+
+    Returns:
+        None.
+    """
+    iteration = 0 if pimple_iteration is None else int(pimple_iteration)
+    variable_map = container.setdefault(variable, {})
+    phase_map = variable_map.setdefault(phase, {})
+    phase_map.setdefault(iteration, []).append(residual)
+
+
 def finalize_step(step: Dict[str, object]) -> Dict[str, object]:
+    """Flatten all diagnostic data collected for one physical time step.
+
+    Args:
+        step: Dictionary created by :func:`initialize_step` and filled while
+            scanning a time-step block.
+
+    Returns:
+        A flat dictionary that can be inserted as one row in the output
+        pandas DataFrame.
+    """
     flat = dict(step)
 
     p_rgh_initial = flat.pop("_p_rgh_initial_residuals")
@@ -199,6 +330,10 @@ def finalize_step(step: Dict[str, object]) -> Dict[str, object]:
     phase_theta = flat.pop("_phase_theta")
     scalar_initial_residuals = flat.pop("_scalar_initial_residuals")
     scalar_linear_iterations = flat.pop("_scalar_linear_iterations")
+    energy_initial_residuals_by_pimple = flat.pop(
+        "_energy_initial_residuals_by_pimple"
+    )
+    flat.pop("_current_pimple_iteration", None)
 
     flat["p_rgh_initial_residual_last"] = safe_last(p_rgh_initial)
     flat["p_rgh_initial_residual_max"] = safe_max(p_rgh_initial)
@@ -236,6 +371,30 @@ def finalize_step(step: Dict[str, object]) -> Dict[str, object]:
         flat[f"{token}_theta_min"] = values.get("min")
         flat[f"{token}_theta_max"] = values.get("max")
 
+    for variable, phase_map in energy_initial_residuals_by_pimple.items():
+        var_token = sanitize(variable)
+        for phase, iteration_map in phase_map.items():
+            phase_token = sanitize(phase)
+            prefix = f"{var_token}_{phase_token}"
+            iteration_items = sorted(
+                (iteration, residuals)
+                for iteration, residuals in iteration_map.items()
+                if residuals
+            )
+            if not iteration_items:
+                continue
+
+            first_pimple_residuals = iteration_items[0][1]
+            last_pimple_residuals = iteration_items[-1][1]
+
+            flat[f"{prefix}_residual_first_pimple_first_solve"] = (
+                first_pimple_residuals[0]
+            )
+            flat[f"{prefix}_residual_last_pimple_first_solve"] = (
+                last_pimple_residuals[0]
+            )
+            flat[f"{prefix}_residual_last_solve"] = last_pimple_residuals[-1]
+
     for variable, phase_map in scalar_linear_iterations.items():
         var_token = sanitize(variable)
         for phase, values in phase_map.items():
@@ -259,6 +418,18 @@ def finalize_step(step: Dict[str, object]) -> Dict[str, object]:
 
 
 def parse_log(log_path: Path) -> Tuple[pd.DataFrame, List[str], Optional[str]]:
+    """Parse an OpenPDAC/OpenFOAM log file in streaming mode.
+
+    Args:
+        log_path: Path to the log file to parse.
+
+    Returns:
+        A tuple with the diagnostics DataFrame, the sorted list of detected
+        phases, and the detected energy variable name (``h`` or ``e``), if any.
+
+    Raises:
+        RuntimeError: If no physical time steps are detected in the log.
+    """
     pending = {
         "execution_time_s": None,
         "clock_time_s": None,
@@ -306,9 +477,11 @@ def parse_log(log_path: Path) -> Tuple[pd.DataFrame, List[str], Optional[str]]:
 
             match = RE_PIMPLE_ITER.match(line)
             if match:
+                pimple_iteration = int(match.group(1))
+                current_step["_current_pimple_iteration"] = pimple_iteration
                 current_step["max_pimple_iteration"] = max(
                     int(current_step["max_pimple_iteration"]),
-                    int(match.group(1)),
+                    pimple_iteration,
                 )
                 continue
 
@@ -339,7 +512,9 @@ def parse_log(log_path: Path) -> Tuple[pd.DataFrame, List[str], Optional[str]]:
 
             match = RE_P_RGH_SOLVE.match(line)
             if match:
-                current_step["_p_rgh_initial_residuals"].append(to_float(match.group(1)))
+                current_step["_p_rgh_initial_residuals"].append(
+                    to_float(match.group(1))
+                )
                 current_step["_p_rgh_final_residuals"].append(to_float(match.group(2)))
                 continue
 
@@ -347,6 +522,11 @@ def parse_log(log_path: Path) -> Tuple[pd.DataFrame, List[str], Optional[str]]:
             if match:
                 current_step["p_min"] = to_float(match.group(1))
                 current_step["p_max"] = to_float(match.group(2))
+                continue
+
+            match = RE_P_RATIO.match(line)
+            if match:
+                current_step["last_p_ratio"] = to_float(match.group(1))
                 continue
 
             match = RE_PHASE_T.match(line)
@@ -372,7 +552,9 @@ def parse_log(log_path: Path) -> Tuple[pd.DataFrame, List[str], Optional[str]]:
             if match:
                 phase = match.group(1)
                 phases.add(phase)
-                frac_map = ensure_nested(current_step["_phase_fraction_after_clip"], phase)
+                frac_map = ensure_nested(
+                    current_step["_phase_fraction_after_clip"], phase
+                )
                 frac_map["avg"] = to_float(match.group(2))
                 frac_map["min"] = to_float(match.group(3))
                 frac_map["max"] = to_float(match.group(4))
@@ -470,6 +652,13 @@ def parse_log(log_path: Path) -> Tuple[pd.DataFrame, List[str], Optional[str]]:
 
                 if variable in {"h", "e"}:
                     energy_variable = variable
+                    append_energy_pimple_residual(
+                        current_step["_energy_initial_residuals_by_pimple"],
+                        variable,
+                        phase_key,
+                        current_step.get("_current_pimple_iteration"),
+                        value,
+                    )
                 continue
 
     if current_step is not None:
@@ -490,11 +679,30 @@ def parse_log(log_path: Path) -> Tuple[pd.DataFrame, List[str], Optional[str]]:
 
 
 def apply_common_style(ax, xlabel: str = "Physical time [s]") -> None:
+    """Apply labels and grid styling shared by all diagnostic plots.
+
+    Args:
+        ax: Matplotlib axes object to style.
+        xlabel: Label used for the x axis.
+
+    Returns:
+        None.
+    """
     ax.set_xlabel(xlabel)
     ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.5)
 
 
 def save_figure(fig, output_path: Path) -> None:
+    """Save a Matplotlib figure in both PNG and PDF formats.
+
+    Args:
+        fig: Matplotlib figure object.
+        output_path: Output path without extension, or with an extension that
+            will be replaced by ``.png`` and ``.pdf``.
+
+    Returns:
+        None.
+    """
     png_path = output_path.with_suffix(".png")
     pdf_path = output_path.with_suffix(".pdf")
     fig.tight_layout()
@@ -504,12 +712,37 @@ def save_figure(fig, output_path: Path) -> None:
 
 
 def merge_legends(ax1, ax2) -> None:
+    """Merge legends from a two-axis plot onto the first axes object.
+
+    Args:
+        ax1: Primary Matplotlib axes object.
+        ax2: Secondary Matplotlib axes object created with ``twinx``.
+
+    Returns:
+        None.
+    """
     lines_1, labels_1 = ax1.get_legend_handles_labels()
     lines_2, labels_2 = ax2.get_legend_handles_labels()
     ax1.legend(lines_1 + lines_2, labels_1 + labels_2, frameon=True)
 
 
-def apply_dual_axis_style(ax1, ax2, left_color: str = "tab:blue", right_color: str = "tab:red") -> None:
+def apply_dual_axis_style(
+    ax1,
+    ax2,
+    left_color: str = "tab:blue",
+    right_color: str = "tab:red",
+) -> None:
+    """Color-code the two y axes of a dual-axis diagnostic plot.
+
+    Args:
+        ax1: Left Matplotlib axes object.
+        ax2: Right Matplotlib axes object.
+        left_color: Color used for the left y axis.
+        right_color: Color used for the right y axis.
+
+    Returns:
+        None.
+    """
     ax1.tick_params(axis="y", colors=left_color)
     ax2.tick_params(axis="y", colors=right_color)
     ax1.yaxis.label.set_color(left_color)
@@ -518,14 +751,46 @@ def apply_dual_axis_style(ax1, ax2, left_color: str = "tab:blue", right_color: s
     ax2.spines["right"].set_color(right_color)
 
 
-def axis_color_sequence(cmap_name: str, n: int, start: float, stop: float) -> List:
+def axis_color_sequence(
+    cmap_name: str,
+    n: int,
+    start: float,
+    stop: float,
+) -> List:
+    """Sample a sequence of colors from a Matplotlib colormap.
+
+    Args:
+        cmap_name: Name of the Matplotlib colormap.
+        n: Number of colors to return.
+        start: First normalized colormap coordinate.
+        stop: Last normalized colormap coordinate.
+
+    Returns:
+        A list of RGBA color values.
+    """
     cmap = plt.get_cmap(cmap_name)
     if n <= 1:
         return [cmap((start + stop) / 2.0)]
     return [cmap(start + i * (stop - start) / (n - 1)) for i in range(n)]
 
 
-def phase_styles(phases: List[str], cmap_name: str, start: float, stop: float) -> Dict[str, Dict[str, object]]:
+def phase_styles(
+    phases: List[str],
+    cmap_name: str,
+    start: float,
+    stop: float,
+) -> Dict[str, Dict[str, object]]:
+    """Build line-style and color settings for phase-dependent plots.
+
+    Args:
+        phases: Names of the detected phases.
+        cmap_name: Name of the Matplotlib colormap.
+        start: First normalized colormap coordinate.
+        stop: Last normalized colormap coordinate.
+
+    Returns:
+        A dictionary indexed by phase name with ``color`` and ``linestyle`` keys.
+    """
     styles = ["-", "--", ":", "-."]
     colors = axis_color_sequence(cmap_name, max(len(phases), 1), start, stop)
     mapping = {}
@@ -538,8 +803,22 @@ def phase_styles(phases: List[str], cmap_name: str, start: float, stop: float) -
 
 
 def plot_performance(df: pd.DataFrame, output_dir: Path) -> None:
+    """Generate execution-time diagnostic plots.
+
+    Args:
+        df: DataFrame containing one row per physical time step.
+        output_dir: Directory where figures are written.
+
+    Returns:
+        None.
+    """
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(df["time"], df["execution_time_s"], label="Execution time", linewidth=LINE_WIDTH)
+    ax.plot(
+        df["time"],
+        df["execution_time_s"],
+        label="Execution time",
+        linewidth=LINE_WIDTH,
+    )
     ax.set_ylabel("Execution time [s]")
     ax.set_title("Cumulative execution time")
     apply_common_style(ax)
@@ -547,7 +826,12 @@ def plot_performance(df: pd.DataFrame, output_dir: Path) -> None:
     save_figure(fig, output_dir / "performance_execution_time")
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(df["time"], df["execution_time_step_s"], label="Time per step", linewidth=LINE_WIDTH)
+    ax.plot(
+        df["time"],
+        df["execution_time_step_s"],
+        label="Time per step",
+        linewidth=LINE_WIDTH,
+    )
     ax.plot(
         df["time"],
         rolling_mean(df["execution_time_step_s"], window=25),
@@ -563,6 +847,15 @@ def plot_performance(df: pd.DataFrame, output_dir: Path) -> None:
 
 
 def plot_stability(df: pd.DataFrame, output_dir: Path) -> None:
+    """Generate time-step and Courant-number stability plots.
+
+    Args:
+        df: DataFrame containing one row per physical time step.
+        output_dir: Directory where figures are written.
+
+    Returns:
+        None.
+    """
     if not df["delta_t"].notna().any() and not df["courant_max"].notna().any():
         return
 
@@ -599,6 +892,20 @@ def plot_stability(df: pd.DataFrame, output_dir: Path) -> None:
 
 
 def plot_pressure(df: pd.DataFrame, output_dir: Path) -> None:
+    """Generate pressure and pressure-stability diagnostic plots.
+
+    The ``pimple_residual_ratio`` is handled separately by :func:`plot_pimple`.
+    This function handles pressure extrema and ``p_ratio``, where ``p_ratio``
+    is the low-pressure time-step diagnostic based on the global pressure
+    minimum relative to the mean pressure.
+
+    Args:
+        df: DataFrame containing one row per physical time step.
+        output_dir: Directory where figures are written.
+
+    Returns:
+        None.
+    """
     if (
         "first_pimple_initial_residual" in df.columns
         and "last_pimple_initial_residual" in df.columns
@@ -669,33 +976,111 @@ def plot_pressure(df: pd.DataFrame, output_dir: Path) -> None:
         merge_legends(ax1, ax2)
 
         save_figure(fig, output_dir / "pressure_extrema")
-def plot_energy(df: pd.DataFrame, output_dir: Path, phases: List[str], energy_variable: Optional[str]) -> None:
+
+    if "last_p_ratio" in df.columns and df["last_p_ratio"].notna().any():
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.plot(
+            df["time"],
+            df["last_p_ratio"],
+            label="p_ratio = global min(p) / mean(p)",
+            linewidth=LINE_WIDTH,
+        )
+        ax.set_ylabel("Pressure ratio [-]")
+        ax.set_title("Low-pressure time-step correction diagnostic")
+        apply_common_style(ax)
+        ax.legend(frameon=True)
+        save_figure(fig, output_dir / "stability_pressure_ratio")
+
+
+def plot_energy(
+    df: pd.DataFrame,
+    output_dir: Path,
+    phases: List[str],
+    energy_variable: Optional[str],
+) -> None:
+    """Generate energy-residual and temperature-extrema plots.
+
+    The energy residual plot contains three diagnostics for each phase:
+
+    * the first energy-equation initial residual in the first PIMPLE
+      iteration of the time step;
+    * the first energy-equation initial residual in the last PIMPLE
+      iteration of the time step;
+    * the initial residual of the last energy solve in the time step.
+
+    This separates the effect of the outer PIMPLE coupling from the effect
+    of the internal energy-correction loop and thermodynamic updates.
+
+    Args:
+        df: DataFrame containing one row per physical time step.
+        output_dir: Directory where figures are written.
+        phases: Names of the detected phases.
+        energy_variable: Detected energy variable, usually ``h`` or ``e``.
+
+    Returns:
+        None.
+    """
     if energy_variable is not None:
         fig, ax = plt.subplots(figsize=(10, 5))
         plotted = False
         styles = phase_styles(phases, "tab10", 0.0, 1.0)
+        energy_token = sanitize(energy_variable)
+        residual_specs = [
+            (
+                "residual_first_pimple_first_solve",
+                "first PIMPLE / first solve",
+                "--",
+            ),
+            (
+                "residual_last_pimple_first_solve",
+                "last PIMPLE / first solve",
+                "-",
+            ),
+            (
+                "residual_last_solve",
+                "last energy solve",
+                ":",
+            ),
+        ]
 
         for phase in phases:
-            token = sanitize(phase)
-            column = f"{sanitize(energy_variable)}_{token}_initial_residual_last"
-            if column in df.columns and df[column].notna().any():
-                style = styles[phase]
-                ax.plot(
-                    df["time"],
-                    df[column],
-                    label=f"{energy_variable}.{phase} initial residual",
-                    linewidth=LINE_WIDTH,
-                    color=style["color"],
-                    linestyle=style["linestyle"],
-                )
-                plotted = True
+            phase_token = sanitize(phase)
+            style = styles[phase]
+            for suffix, label_suffix, line_style in residual_specs:
+                column = f"{energy_token}_{phase_token}_{suffix}"
+                if column in df.columns and df[column].notna().any():
+                    ax.plot(
+                        df["time"],
+                        df[column],
+                        label=f"{energy_variable}.{phase} {label_suffix}",
+                        linewidth=LINE_WIDTH,
+                        color=style["color"],
+                        linestyle=line_style,
+                    )
+                    plotted = True
+
+        if not plotted:
+            for phase in phases:
+                phase_token = sanitize(phase)
+                column = f"{energy_token}_{phase_token}_initial_residual_last"
+                if column in df.columns and df[column].notna().any():
+                    style = styles[phase]
+                    ax.plot(
+                        df["time"],
+                        df[column],
+                        label=f"{energy_variable}.{phase} last initial residual",
+                        linewidth=LINE_WIDTH,
+                        color=style["color"],
+                        linestyle=style["linestyle"],
+                    )
+                    plotted = True
 
         if plotted:
             ax.set_yscale("log")
             ax.set_ylabel("Residual [-]")
             ax.set_title(f"{energy_variable} residual diagnostics")
             apply_common_style(ax)
-            ax.legend(frameon=True)
+            ax.legend(frameon=True, ncol=2)
             save_figure(fig, output_dir / "energy_residuals")
         else:
             plt.close(fig)
@@ -750,11 +1135,24 @@ def plot_energy(df: pd.DataFrame, output_dir: Path, phases: List[str], energy_va
         merge_legends(ax1, ax2)
         save_figure(fig, output_dir / "energy_temperature_extrema")
 
+def plot_min_temp_oscillations(
+    df: pd.DataFrame,
+    output_dir: Path,
+    phases: List[str],
+) -> None:
+    """Plot phase-wise minimum-temperature oscillations.
 
+    Args:
+        df: DataFrame containing one row per physical time step.
+        output_dir: Directory where figures are written.
+        phases: Names of the detected phases.
 
-def plot_min_temp_oscillations(df: pd.DataFrame, output_dir: Path, phases: List[str]) -> None:
-    """Plot phase-wise minimum-temperature oscillations over physical time."""
-    oscillation_columns = [f"{sanitize(phase)}_min_temp_oscillation" for phase in phases]
+    Returns:
+        None.
+    """
+    oscillation_columns = [
+        f"{sanitize(phase)}_min_temp_oscillation" for phase in phases
+    ]
     has_oscillations = any(
         column in df.columns and df[column].notna().any()
         for column in oscillation_columns
@@ -822,7 +1220,23 @@ def plot_min_temp_oscillations(df: pd.DataFrame, output_dir: Path, phases: List[
         apply_common_style(ax)
         ax.legend(frameon=True)
         save_figure(fig, output_dir / f"energy_min_temp_stats_{token}")
-def plot_volume_fractions(df: pd.DataFrame, output_dir: Path, phases: List[str]) -> None:
+
+
+def plot_volume_fractions(
+    df: pd.DataFrame,
+    output_dir: Path,
+    phases: List[str],
+) -> None:
+    """Generate volume-fraction, packing, and theta diagnostic plots.
+
+    Args:
+        df: DataFrame containing one row per physical time step.
+        output_dir: Directory where figures are written.
+        phases: Names of the detected phases.
+
+    Returns:
+        None.
+    """
     fig, ax = plt.subplots(figsize=(10, 5))
     plotted = False
     styles = phase_styles(phases, "tab20", 0.0, 1.0)
@@ -855,7 +1269,11 @@ def plot_volume_fractions(df: pd.DataFrame, output_dir: Path, phases: List[str])
             )
             plotted = True
 
-    if "packing_proximity_max" in df.columns and df["packing_proximity_max"].notna().any():
+    has_packing_proximity = (
+        "packing_proximity_max" in df.columns
+        and df["packing_proximity_max"].notna().any()
+    )
+    if has_packing_proximity:
         ax.plot(
             df["time"],
             df["packing_proximity_max"],
@@ -895,7 +1313,11 @@ def plot_volume_fractions(df: pd.DataFrame, output_dir: Path, phases: List[str])
                     label=f"{phase} {label_suffix}",
                     linewidth=LINE_WIDTH,
                     color=style["color"],
-                    linestyle=line_style if line_style is not None else style["linestyle"],
+                    linestyle=(
+                        line_style
+                        if line_style is not None
+                        else style["linestyle"]
+                    ),
                 )
                 plotted = True
 
@@ -939,10 +1361,23 @@ def plot_volume_fractions(df: pd.DataFrame, output_dir: Path, phases: List[str])
 
 
 def plot_pimple(df: pd.DataFrame, output_dir: Path) -> None:
+    """Generate PIMPLE-iteration and residual-ratio diagnostic plots.
+
+    Args:
+        df: DataFrame containing one row per physical time step.
+        output_dir: Directory where figures are written.
+
+    Returns:
+        None.
+    """
     fig, ax = plt.subplots(figsize=(10, 5))
     plotted = False
 
-    if "max_pimple_iteration" in df.columns and df["max_pimple_iteration"].notna().any():
+    has_max_pimple_iteration = (
+        "max_pimple_iteration" in df.columns
+        and df["max_pimple_iteration"].notna().any()
+    )
+    if has_max_pimple_iteration:
         ax.plot(
             df["time"],
             df["max_pimple_iteration"],
@@ -951,7 +1386,11 @@ def plot_pimple(df: pd.DataFrame, output_dir: Path) -> None:
         )
         plotted = True
 
-    if "effective_pimple_iterations" in df.columns and df["effective_pimple_iterations"].notna().any():
+    has_effective_pimple_iterations = (
+        "effective_pimple_iterations" in df.columns
+        and df["effective_pimple_iterations"].notna().any()
+    )
+    if has_effective_pimple_iterations:
         ax.plot(
             df["time"],
             df["effective_pimple_iterations"],
@@ -970,7 +1409,11 @@ def plot_pimple(df: pd.DataFrame, output_dir: Path) -> None:
     else:
         plt.close(fig)
 
-    if "last_pimple_residual_ratio" in df.columns and df["last_pimple_residual_ratio"].notna().any():
+    has_pimple_residual_ratio = (
+        "last_pimple_residual_ratio" in df.columns
+        and df["last_pimple_residual_ratio"].notna().any()
+    )
+    if has_pimple_residual_ratio:
         fig, ax = plt.subplots(figsize=(10, 5))
         ax.plot(
             df["time"],
@@ -985,7 +1428,23 @@ def plot_pimple(df: pd.DataFrame, output_dir: Path) -> None:
         save_figure(fig, output_dir / "pimple_residual_ratio")
 
 
-def make_all_plots(df: pd.DataFrame, output_dir: Path, phases: List[str], energy_variable: Optional[str]) -> None:
+def make_all_plots(
+    df: pd.DataFrame,
+    output_dir: Path,
+    phases: List[str],
+    energy_variable: Optional[str],
+) -> None:
+    """Generate all available diagnostic figures.
+
+    Args:
+        df: DataFrame containing one row per physical time step.
+        output_dir: Directory where figures are written.
+        phases: Names of the detected phases.
+        energy_variable: Detected energy variable, usually ``h`` or ``e``.
+
+    Returns:
+        None.
+    """
     plot_performance(df, output_dir)
     plot_stability(df, output_dir)
     plot_pressure(df, output_dir)
@@ -996,6 +1455,14 @@ def make_all_plots(df: pd.DataFrame, output_dir: Path, phases: List[str], energy
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
+    """Build the command-line argument parser.
+
+    Args:
+        None.
+
+    Returns:
+        Configured :class:`argparse.ArgumentParser` instance.
+    """
     parser = argparse.ArgumentParser(
         description=(
             "Parse an OpenFOAM log file, extract diagnostics, save CSV, "
@@ -1019,6 +1486,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    """Run the command-line workflow.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
     parser = build_argument_parser()
     args = parser.parse_args()
 
