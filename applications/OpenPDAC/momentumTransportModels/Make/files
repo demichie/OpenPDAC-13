@@ -1,5 +1,7 @@
 momentumTransportModels.C
 
+phasePressureModel/phasePressureModel.C
+
 kineticTheoryModels/kineticTheoryModel/kineticTheoryModel.C
 
 kineticTheoryModels/viscosityModel/viscosityModel/kineticTheoryViscosityModel.C

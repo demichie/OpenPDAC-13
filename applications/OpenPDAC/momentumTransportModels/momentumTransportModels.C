@@ -55,4 +55,10 @@ makeMomentumTransportModel(phaseCompressibleMomentumTransportModel,
                            kineticTheoryModel);
 
 
+#include "phasePressureModel.H"
+makeMomentumTransportModel(phaseCompressibleMomentumTransportModel,
+                           RAS,
+                           phasePressureModel);
+
+
 // ************************************************************************* //
