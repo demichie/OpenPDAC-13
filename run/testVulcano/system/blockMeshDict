@@ -801,7 +801,7 @@ codeInclude
         // ------------------------------------------------------------------
         // Note: r_cr_top is already defined in your code (crater radius at this layer)
 
-        scalar scale_factor = pow(2.0, layer); 
+        scalar scale_factor = pow($exp_fact, layer); 
         scalar d_start_curr = actual_crater_top_size * scale_factor; // Target cell size at the crater rim
 
         // ------------------------------------------------------------------
