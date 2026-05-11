@@ -37,13 +37,22 @@ n_vert_layers       4;        // number of layers in the atmosphere
 
 // vertical to horizontal aspect ratio of cells at the bottom of each layer
 // for the first layer the horizontal size is that of the crater
-atmCells_aspect_ratio_bottom List<scalar> (1.0 1.0 1.0 1.0);
+atmCells_aspect_ratio_bottom List<scalar> (1.5 1.0 1.0 1.0);
 
 // vertical to horizontal aspect ratio of cells at the top of each layer
 atmCells_aspect_ratio_top   List<scalar> (2.0 2.0 2.0 1.0);
 
+// 1 = uniform split for outer edges at top of inner layers
+// 2 = uniform split for outer edges at bottom of inner layers
+// 3 = weighted averege of the previous two options 
+outerSplitStrategy 3;
+
+// only used when  outerSplitStrategy = 3
+// 0.5 = arithmetic average
+outerSplitWeight 0.5;
+
 // factor for inner region enlargment from bottom to top of each layer
-exp_fact          2.0;
+exp_fact          1.8;
 
 // Fixed parameters
 crater_top_z        0.0;      // elevation of the crater top in the block mesh
