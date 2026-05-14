@@ -1229,6 +1229,10 @@ def plot_volume_fractions(
 ) -> None:
     """Generate volume-fraction, packing, and theta diagnostic plots.
 
+    Volume-fraction extrema and packing-proximity diagnostics are written
+    to separate figures because they usually have very different ranges and
+    physical interpretations.
+
     Args:
         df: DataFrame containing one row per physical time step.
         output_dir: Directory where figures are written.
@@ -1237,6 +1241,7 @@ def plot_volume_fractions(
     Returns:
         None.
     """
+    # Phase volume-fraction extrema only.
     fig, ax = plt.subplots(figsize=(10, 5))
     plotted = False
     styles = phase_styles(phases, "tab20", 0.0, 1.0)
@@ -1269,29 +1274,49 @@ def plot_volume_fractions(
             )
             plotted = True
 
-    has_packing_proximity = (
-        "packing_proximity_max" in df.columns
-        and df["packing_proximity_max"].notna().any()
-    )
-    if has_packing_proximity:
-        ax.plot(
-            df["time"],
-            df["packing_proximity_max"],
-            label="Packing proximity max",
-            linewidth=LINE_WIDTH,
-            color="black",
-            linestyle="-.",
-        )
-        plotted = True
-
     if plotted:
-        ax.set_ylabel("Value [-]")
-        ax.set_title("Volume-fraction diagnostics")
+        ax.set_ylabel("Volume fraction [-]")
+        ax.set_title("Volume-fraction extrema")
         apply_common_style(ax)
         ax.legend(frameon=True, ncol=2)
         save_figure(fig, output_dir / "fractions_diagnostics")
     else:
         plt.close(fig)
+
+    # Packing proximity in a separate figure.
+    packing_columns = [
+        ("packing_proximity_avg", "Packing proximity avg", "-"),
+        ("packing_proximity_min", "Packing proximity min", "--"),
+        ("packing_proximity_max", "Packing proximity max", ":"),
+    ]
+    has_packing_proximity = any(
+        column in df.columns and df[column].notna().any()
+        for column, _, _ in packing_columns
+    )
+
+    if has_packing_proximity:
+        fig, ax = plt.subplots(figsize=(10, 5))
+        plotted = False
+        for column, label, linestyle in packing_columns:
+            if column in df.columns and df[column].notna().any():
+                ax.plot(
+                    df["time"],
+                    df[column],
+                    label=label,
+                    linewidth=LINE_WIDTH,
+                    linestyle=linestyle,
+                )
+                plotted = True
+
+        if plotted:
+            ax.axhline(0.0, linewidth=0.8, linestyle="-.", color="black")
+            ax.set_ylabel("sum(alpha) - alphasMax [-]")
+            ax.set_title("Packing-proximity diagnostics")
+            apply_common_style(ax)
+            ax.legend(frameon=True)
+            save_figure(fig, output_dir / "fractions_packing_proximity")
+        else:
+            plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(10, 5))
     plotted = False
