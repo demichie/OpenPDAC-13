@@ -261,6 +261,58 @@ Foam::kineticTheoryModels::frictionalStressModels::JohnsonJacksonSchaeffer::nu(
 {
     const volScalarField alphas = 1.0 - continuousPhase;
 
+    /*
+        Johnson--Jackson frictional pressure with Schaeffer frictional
+        viscosity.
+
+        The frictional pressure pf passed to this function is the frictional
+        pressure assigned to the current solid phase. In the multi-solid
+        formulation used in OpenPDAC, this pressure is already partitioned as
+
+            pf_s = (alpha_s/alpha_s,tot) pf_tot(alpha_s,tot).
+
+        In MFIX-style formulations, the corresponding frictional viscosity is
+        commonly written directly in terms of pf_s/rho_s, because the solid
+        stress tensor is not multiplied by an additional phase-volume-fraction
+        factor.
+
+        In OpenPDAC, instead, the solid stress tensor keeps the phase volume
+        fraction explicitly. In kineticTheoryModel::divDevTau the frictional
+        viscosity enters through
+
+            alpha_s * rho_s * nu_f.
+
+        Therefore, using nu_f proportional to pf_s/rho_s directly would apply
+        the current phase fraction twice:
+
+            alpha_s * pf_s
+          = alpha_s * (alpha_s/alpha_s,tot) pf_tot.
+
+        This is not invariant when a solid phase is split into two identical
+        phases.
+
+        For consistency with the OpenPDAC stress convention, the viscosity
+        returned here is unweighted with respect to the abundance of the current
+        solid phase. Since pf_s is already proportional to alpha_s, we remove
+        this linear dependence by using pf_s/alpha_s.
+
+        The explicit alpha_s factor in divDevTau then restores the correct
+        contribution to the phase stress:
+
+            alpha_s * rho_s * nu_f
+          = alpha_s * rho_s * [pf_s/(alpha_s*rho_s)] * ...
+          = pf_s * ...
+
+        Hence, for two identical split phases s1 and s2,
+
+            stress_s1 + stress_s2
+
+        reconstructs the stress of the corresponding unsplit phase.
+    */
+
+    const volScalarField alpha(
+        max(volScalarField(phase), phase.residualAlpha()));
+
     tmp<volScalarField> tnu(volScalarField::New(
         IOobject::groupName(Foam::typedName<frictionalStressModel>("nu"),
                             phase.group()),
@@ -274,7 +326,8 @@ Foam::kineticTheoryModels::frictionalStressModels::JohnsonJacksonSchaeffer::nu(
         if (alphas[celli] > alphaMinFriction.value())
         {
             nuf[celli] =
-                0.5 * pf[celli] / rho[celli] * sin(phi_.value())
+                0.5 * pf[celli] / (rho[celli] * alpha[celli])
+                * sin(phi_.value())
                 / (sqrt((1.0 / 3.0) * sqr(tr(D[celli])) - invariantII(D[celli]))
                    + small);
         }
@@ -288,9 +341,11 @@ Foam::kineticTheoryModels::frictionalStressModels::JohnsonJacksonSchaeffer::nu(
         if (!patches[patchi].coupled())
         {
             nufBf[patchi] =
-                (pf.boundaryField()[patchi] / rho.boundaryField()[patchi]
-                 * sin(phi_.value())
-                 / (mag(phase.U()().boundaryField()[patchi].snGrad()) + small));
+                (pf.boundaryField()[patchi]
+                 / (rho.boundaryField()[patchi]
+                    * alpha.boundaryField()[patchi]))
+                * sin(phi_.value())
+                / (mag(phase.U()().boundaryField()[patchi].snGrad()) + small);
         }
     }
 

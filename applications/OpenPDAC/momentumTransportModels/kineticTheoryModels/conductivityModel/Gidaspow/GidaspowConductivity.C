@@ -77,7 +77,14 @@ Foam::kineticTheoryModels::conductivityModels::Gidaspow::kappa(
     // beta is kept in the function signature for consistency with the common
     // conductivity-model interface, but it is intentionally not used here.
     (void)beta;
-    (void)alpha1;
+
+    // g0 is kept in the function signature for consistency with the common
+    // conductivity-model interface. In the present split-consistent
+    // polydisperse form it is not used explicitly, because the monodisperse
+    // factor 1/g0 is recovered from alpha1/sumAlphaGs0 when
+    //
+    //     sumAlphaGs0 -> alpha1*g0.
+    (void)g0;
 
     // eta = (1 + e)/2
     // This is the standard compact notation used to rewrite the original
@@ -88,38 +95,55 @@ Foam::kineticTheoryModels::conductivityModels::Gidaspow::kappa(
     //
     //     kappaGid** = 75*rho*d*sqrt(pi*Theta)/(384*eta)
     //
-    // In the monodisperse limit, the original Gidaspow conductivity can be
-    // written as:
-    //
-    //     kappa = (kappaGid**/g0)
-    //             * [ (1 + 12/5*eta*alpha*g0)^2
-    //                 + 512/(25*pi)*eta^2*(alpha*g0)^2 ]
-    //
-    // The present implementation applies only the polydispersity correction:
-    // - g0       -> self RDF of the current phase
-    // - alpha*g0 -> sum_j(alpha_j*g0_ij)
-    //
-    // No drag correction is introduced in the transport prefactor.
-    const volScalarField kappaStarStar =
-        (75.0 * rho1 * da * sqrtPi * sqrt(Theta)) / (384.0 * eta);
-
-    // Final polydisperse Gidaspow conductivity without drag correction:
+    // In the monodisperse Gidaspow expression, the transport prefactor appears
+    // as kappaGid**/g0 and the crowding factor is alpha*g0:
     //
     //     kappa =
     //         (kappaGid**/g0)
+    //         * [ (1 + 12/5*eta*alpha*g0)^2
+    //             + 512/(25*pi)*eta^2*(alpha*g0)^2 ].
+    //
+    // For the multi-solid formulation we use
+    //
+    //     alpha*g0 -> sum_j alpha_j*g0_ij = sumAlphaGs0.
+    //
+    // However, unlike the shear viscosity in divDevTau, the granular
+    // conductivity kappa enters the granular-temperature equation directly as
+    //
+    //     div(kappa grad(Theta)),
+    //
+    // without an additional external factor alpha_i. Therefore kappa itself
+    // must carry the abundance of the current solid phase.
+    //
+    // To preserve both the monodisperse limit and split-phase consistency, the
+    // monodisperse factor 1/g0 is rewritten as
+    //
+    //     alpha_i/(alpha_i*g0)
+    //
+    // and generalized as
+    //
+    //     alpha_i/sumAlphaGs0.
+    //
+    // This gives the original monodisperse expression when
+    // sumAlphaGs0 = alpha_i*g0, but, if one solid phase is split into two
+    // identical phases, each split phase receives a conductivity proportional
+    // to its own alpha_i. The sum of the two split conductivities then
+    // reconstructs the unsplit conductivity.
+    const volScalarField kappaStarStar =
+        (75.0 * rho1 * da * sqrtPi * sqrt(Theta)) / (384.0 * eta);
+
+    // Split-consistent polydisperse Gidaspow conductivity without drag
+    // correction:
+    //
+    //     kappa =
+    //         kappaGid** * alpha_i/sumAlphaGs0
     //         * [ (1 + 12/5*eta*sumAlphaGs0)^2
-    //             + 512/(25*pi)*eta^2*(sumAlphaGs0)^2 ]
+    //             + 512/(25*pi)*eta^2*(sumAlphaGs0)^2 ].
     //
-    // Consistency checks:
-    // 1) Monodisperse limit:
-    //      sumAlphaGs0 -> alpha1*g0
-    //    and the original compact Gidaspow formula is recovered.
-    //
-    // 2) Split-phase consistency:
-    //      if one solid phase is replaced by two identical phases,
-    //      sumAlphaGs0 is preserved and the constitutive response remains
-    //      consistent with the single-phase case.
-    return kappaStarStar / g0
+    // In expanded form, the terms proportional to (sumAlphaGs0)^2 are therefore
+    // effectively proportional to alpha_i*sumAlphaGs0, not to
+    // (sumAlphaGs0)^2/g0. This is the required scaling for split consistency.
+    return kappaStarStar * alpha1 / sumAlphaGs0
          * (sqr(1.0 + 12.0 / 5.0 * eta * sumAlphaGs0)
             + 512.0 / (25.0 * Pi) * sqr(eta) * sqr(sumAlphaGs0));
 }

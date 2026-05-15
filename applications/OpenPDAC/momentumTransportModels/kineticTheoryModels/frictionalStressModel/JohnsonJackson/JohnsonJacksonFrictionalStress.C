@@ -250,10 +250,57 @@ Foam::kineticTheoryModels::frictionalStressModels::JohnsonJackson::nu(
     const volScalarField& rho,
     const volSymmTensorField& D) const
 {
+    /*
+        Johnson--Jackson frictional viscosity.
+
+        In the MFIX-style form, the frictional viscosity is usually written from
+        the frictional pressure assigned to the solid phase,
+
+            nu_f ~ pf / rho,
+
+        where, in the multi-solid extension used in OpenPDAC, the frictional
+        pressure pf is already partitioned among the solid phases as
+
+            pf_s = (alpha_s/alpha_s,tot) pf_tot.
+
+        However, OpenPDAC keeps the phase volume fraction explicitly in the
+        solid stress tensor. In kineticTheoryModel::divDevTau the frictional
+        viscosity enters through a coefficient of the form
+
+            alpha_s * rho_s * nu_f.
+
+        Therefore, if the MFIX-style expression nu_f = pf_s/rho_s were used
+        directly, the resulting frictional stress would contain the phase
+        fraction twice:
+
+            alpha_s * pf_s
+          = alpha_s * (alpha_s/alpha_s,tot) pf_tot.
+
+        This is not invariant when one solid phase is split into two identical
+        phases.
+
+        For consistency with the OpenPDAC stress convention, nu_f is interpreted
+        here as an unweighted frictional kinematic viscosity, i.e. unweighted
+        with respect to the abundance of the current solid phase. Since pf is
+        already proportional to alpha_s, we remove that linear dependence by
+        using pf/alpha_s. The explicit alpha_s factor in divDevTau then restores
+        the correct phase contribution to the stress:
+
+            alpha_s * rho_s * nu_f
+          = alpha_s * rho_s * (pf_s/(alpha_s rho_s)) * ...
+          = pf_s * ...
+
+        Hence, summing the stresses of two identical split phases gives the
+        same total frictional stress as the corresponding unsplit phase.
+    */
+
+    const volScalarField alpha(
+        max(volScalarField(phase), phase.residualAlpha()));
+
     return volScalarField::New(
         IOobject::groupName(Foam::typedName<frictionalStressModel>("nu"),
                             phase.group()),
-        dimensionedScalar(dimTime, 0.5) * pf / rho * sin(phi_));
+        dimensionedScalar(dimTime, 0.5) * pf / (rho * alpha) * sin(phi_));
 }
 
 

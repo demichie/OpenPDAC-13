@@ -79,7 +79,29 @@ Foam::kineticTheoryModels::viscosityModels::Gidaspow::nu(
 
     const volScalarField mu = 5.0 / 96.0 * rho1 * da * sqrt(Theta) * sqrtPi;
 
-    const volScalarField mu_b = 256.0 / (5.0 * Pi) * mu * alpha1 * sumAlphaGs0;
+    /*
+    MFIX/Gidaspow kinetic-collisional viscosity convention:
+
+        mu_b ~ mu** * alpha_m * sum_l(alpha_l*g0_ml)
+
+    In MFIX the solid stress tensor is not multiplied by an additional
+    phase-volume fraction. Therefore the factor alpha_m belongs inside the
+    dynamic viscosity itself.
+
+    OpenPDAC convention used here:
+
+        divDevTau contains the explicit prefactor alpha_s*rho_s*nu_s.
+
+    Consequently, the viscosity returned by this model must be unweighted with
+    respect to the abundance of the current solid phase. The collision
+    environment remains concentration-dependent through sumAlphaGs0, but the
+    additional multiplicative factor alpha1 is removed to avoid applying the
+    same phase-volume-fraction weight twice.
+
+    The unused alpha1 argument is kept in the function signature for run-time
+    selection compatibility with the other viscosity models.
+    */
+    const volScalarField mu_b = 256.0 / (5.0 * Pi) * mu * sumAlphaGs0;
 
     const volScalarField mu_i =
         (mu / (g0 * eta) * sqr(1 + 8 / 5 * eta * sumAlphaGs0)

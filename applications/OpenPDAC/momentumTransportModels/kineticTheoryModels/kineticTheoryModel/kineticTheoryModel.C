@@ -395,7 +395,9 @@ void Foam::RASModels::kineticTheoryModel::correct()
                                    da,
                                    e_);
 
-        // Bulk viscosity (generalised for multi-particle)
+        // kinematic bulk viscosity unweighted with respect to the current phase
+        // abundance but dependent on the collisional multi-solid environment
+        // through sumAlphaGs0
         lambda_ =
             (4.0 / 3.0) * da * sumAlphaGs0_ * (1 + e_) * ThetaSqrt / sqrtPi;
 
