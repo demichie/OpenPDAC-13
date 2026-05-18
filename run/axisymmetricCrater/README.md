@@ -1,4 +1,4 @@
-# Column Collapse and Pyroclastic Current Initiation Tutorial
+# Pressure-Driven Crater Explosion andPyroclastic Current Initiation Tutorial
 
 ## 1. Case Summary
 
