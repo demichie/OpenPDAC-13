@@ -181,6 +181,27 @@ void Foam::solvers::OpenPDAC::correctCoNum()
         Info << "Courant Number mean: " << meanCoNum << " max: " << CoNum_
              << endl;
     }
+    
+    // Velocity diagnostics written next to the Courant diagnostic so they
+    // can be parsed as time-step-control quantities by the log-analysis tool.
+    const word& continuousPhaseName = fluid.continuousPhaseName();
+    const volVectorField& Uc = phases[continuousPhaseName].U();
+
+    forAll(movingPhases, movingPhasei)
+    {
+        const phaseModel& phase = movingPhases[movingPhasei];
+        const scalar maxMagU = max(mag(phase.U())).value();
+
+        Info << phase.name() << " velocity: maxMagU = " << maxMagU << endl;
+
+        if (phase.name() != continuousPhaseName)
+        {
+            const scalar maxMagUr = max(mag(phase.U() - Uc)).value();
+
+            Info << phase.name()
+                 << " relativeVelocity: maxMagUr = " << maxMagUr << endl;
+        }
+    }
 }
 
 void Foam::solvers::OpenPDAC::checkFiniteScalar(const scalar x,
@@ -347,14 +368,14 @@ Foam::solvers::OpenPDAC::OpenPDAC(fvMesh& mesh)
     Info << "min muC " << min(muC).value() << " max muC " << max(muC).value()
          << endl;
 
-    volScalarField alphasMax = fluid_.alfasMax();
+    volScalarField alphasMax(fluid_.alfasMax());
     Info << "min alphasMax " << min(alphasMax).value() << " max alphasMax "
          << max(alphasMax).value() << endl;
 
     // Mixture viscosity
-    volScalarField alphaS = 1.0 - max(0.0, phases[continuousPhaseName]);
-    volScalarField base =
-        1.0 - min(alphaS / (alphasMax + ROOTVSMALL), 1.0 - 1.0e-6);
+    volScalarField alphaS(1.0 - max(0.0, phases[continuousPhaseName]));
+    volScalarField base(
+        1.0 - min(alphaS / (alphasMax + ROOTVSMALL), 1.0 - 1.0e-6));
 
     muMix = muC * pow(base, -1.55);
 
@@ -607,16 +628,16 @@ void Foam::solvers::OpenPDAC::postSolve()
         muMix.primitiveFieldRef() = 0.0; // Pulisce i valori vecchi
     }
 
-    volScalarField alphasMax =
-        max(fluid_.alfasMax(), dimensionedScalar(dimless, 0.01));
+    volScalarField alphasMax(
+        max(fluid_.alfasMax(), dimensionedScalar(dimless, 0.01)));
     const word& continuousPhaseName = fluid.continuousPhaseName();
 
-    volScalarField alphaS =
-        1.0 - max(0.0, min(1.0, phases[continuousPhaseName]));
-    volScalarField base = max(0.01, 1.0 - alphaS / alphasMax);
+    volScalarField alphaS(
+        1.0 - max(0.0, min(1.0, phases[continuousPhaseName])));
+    volScalarField base(max(0.01, 1.0 - alphaS / alphasMax));
 
-    const volScalarField& muC = phases[continuousPhaseName].fluidThermo().mu();
-    volScalarField muTemp = muC * pow(base, -1.55);
+    const volScalarField& muC(phases[continuousPhaseName].fluidThermo().mu());
+    volScalarField muTemp(muC * pow(base, -1.55));
 
     muMix = max(muTemp, muC);
 

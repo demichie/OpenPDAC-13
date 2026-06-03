@@ -70,7 +70,7 @@ Foam::PtrList<Foam::volScalarField> Foam::radialModels::CarnahanStarling::g0(
     PtrList<volScalarField> g0_im(fluid.phases().size());
 
     volScalarField alphas = alphai;
-    volScalarField eta2 = alphai / phasei.d();
+    volScalarField eta2(alphai / phasei.d());
 
     forAll(fluid.phases(), phaseIdx)
     {
@@ -82,7 +82,7 @@ Foam::PtrList<Foam::volScalarField> Foam::radialModels::CarnahanStarling::g0(
         }
     }
 
-    const volScalarField denominatorTerm = 1.0 - alphas;
+    const volScalarField denominatorTerm(1.0 - alphas);
 
     forAll(g0_im, iter)
     {
@@ -90,10 +90,10 @@ Foam::PtrList<Foam::volScalarField> Foam::radialModels::CarnahanStarling::g0(
 
         if (&phasem != &continuousPhase)
         {
-            const volScalarField di = phasei.d();
-            const volScalarField dm = phasem.d();
+            const volScalarField di(phasei.d());
+            const volScalarField dm(phasem.d());
             const dimensionedScalar smallD("smallD", dimLength, ROOTVSMALL);
-            volScalarField term_d = di * dm / (di + dm + smallD);
+            volScalarField term_d(di * dm / (di + dm + smallD));
 
             g0_im.set(iter,
                       new volScalarField(
@@ -159,7 +159,7 @@ Foam::radialModels::CarnahanStarling::g0prime(
     volScalarField alphas = phasei;
 
     // Mixture moment: eta2 = sum_j(alpha_j/d_j)
-    volScalarField eta2 = phasei / phasei.d();
+    volScalarField eta2(phasei / phasei.d());
 
     forAll(fluid.phases(), phaseIdx)
     {
@@ -173,13 +173,13 @@ Foam::radialModels::CarnahanStarling::g0prime(
     }
 
     // Denominator appearing in the Carnahan-Starling expression
-    const volScalarField denominatorTerm = 1.0 - alphas;
+    const volScalarField denominatorTerm(1.0 - alphas);
 
     // Exact derivative of eta2 with respect to alpha_i:
     //
     //   d/d(alpha_i) [ sum_j(alpha_j/d_j) ] = 1/d_i
     //
-    const volScalarField dEta2dAlphai = 1.0 / phasei.d();
+    const volScalarField dEta2dAlphai(1.0 / phasei.d());
 
     forAll(g0prime_im, iter)
     {
@@ -187,8 +187,8 @@ Foam::radialModels::CarnahanStarling::g0prime(
 
         if (&phasem != &continuousPhase)
         {
-            const volScalarField di = phasei.d();
-            const volScalarField dm = phasem.d();
+            const volScalarField di(phasei.d());
+            const volScalarField dm(phasem.d());
 
             // Pair size factor:
             //
@@ -196,7 +196,7 @@ Foam::radialModels::CarnahanStarling::g0prime(
             //
             // A small denominator safeguard is kept for robustness.
             const dimensionedScalar smallD("smallD", dimLength, ROOTVSMALL);
-            const volScalarField Aim = di * dm / (di + dm + smallD);
+            const volScalarField Aim(di * dm / (di + dm + smallD));
 
             // Derivative of:
             //

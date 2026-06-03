@@ -70,7 +70,7 @@ Foam::PtrList<Foam::volScalarField> Foam::radialModels::SinclairJackson::g0(
     PtrList<volScalarField> g0_mm(fluid.phases().size());
     PtrList<volScalarField> g0_im(fluid.phases().size());
 
-    volScalarField const_sum = alphai / phasei.d();
+    volScalarField const_sum(alphai / phasei.d());
 
     forAll(fluid.phases(), phaseIdx)
     {
@@ -83,10 +83,10 @@ Foam::PtrList<Foam::volScalarField> Foam::radialModels::SinclairJackson::g0(
         }
     }
 
-    volScalarField alphas = 1.0 - continuousPhase;
+    volScalarField alphas(1.0 - continuousPhase);
 
-    volScalarField g0 =
-        1.0 / (1 - cbrt(min(alphas, alphaMinFriction) / alphasMax));
+    volScalarField g0(
+        1.0 / (1 - cbrt(min(alphas, alphaMinFriction) / alphasMax)));
 
     forAll(fluid.phases(), phaseIdx)
     {
@@ -162,7 +162,7 @@ Foam::radialModels::SinclairJackson::g0prime(
     //
     //     d/dalpha_i [sum_j(alpha_j/d_j)] = 1/d_i .
     // ---------------------------------------------------------------------
-    volScalarField const_sum = alphai / phasei.d();
+    volScalarField const_sum(alphai / phasei.d());
 
     forAll(fluid.phases(), phaseIdx)
     {
@@ -177,7 +177,7 @@ Foam::radialModels::SinclairJackson::g0prime(
 
     // Total solids volume fraction.
     // The Sinclair-Jackson singularity depends only on alpha_s,tot.
-    volScalarField alphas = 1.0 - continuousPhase;
+    volScalarField alphas(1.0 - continuousPhase);
 
     // ---------------------------------------------------------------------
     // Base radial function used in g0():

@@ -79,7 +79,7 @@ Foam::kineticTheoryModels::viscosityModels::Lun::nu(
     const dimensionedScalar eta = 0.5 * (1.0 + e);
 
     // Eq. B6 MFIX2012
-    const volScalarField mu = 5.0 / 96.0 * rho1 * da * sqrt(Theta) * sqrtPi;
+    const volScalarField mu(5.0 / 96.0 * rho1 * da * sqrt(Theta) * sqrtPi);
 
     /*
     Eq. B7 MFIX2012, with OpenPDAC stress-tensor convention.
@@ -97,7 +97,7 @@ Foam::kineticTheoryModels::viscosityModels::Lun::nu(
     environment is retained through sumAlphaGs0, but the multiplicative alpha1
     factor from the MFIX viscosity is removed to avoid double weighting.
     */
-    const volScalarField mu_b = 256.0 / (5.0 * Pi) * mu * sumAlphaGs0;
+    const volScalarField mu_b(256.0 / (5.0 * Pi) * mu * sumAlphaGs0);
 
     /*
     Eq. B5 MFIX2012, with the same OpenPDAC convention.
@@ -111,19 +111,19 @@ Foam::kineticTheoryModels::viscosityModels::Lun::nu(
     alpha1. The MFIX term beta/alpha_m is therefore a drag-per-solid-volume
     correction. This split-invariant quantity is preserved as beta/alpha1.
     */
-    const volScalarField betaByAlpha = beta / alpha1;
+    const volScalarField betaByAlpha(beta / alpha1);
 
-    const volScalarField muStar =
+    const volScalarField muStar(
         (rho1 * g0 * Theta * mu)
        /(rho1 * sumAlphaGs0 * (Theta + ThetaSmall)
-         + (2 * betaByAlpha * mu) / rho1);
+         + (2 * betaByAlpha * mu) / rho1));
 
     // Eq. B4 MFIX2012, using the unweighted muStar and mu_b defined above.
-    const volScalarField mu_i =
+    const volScalarField mu_i(
         (2 + alfa_) / 3.0
         * (muStar / (g0 * eta * (2 - eta)) * (1 + 8 / 5 * eta * sumAlphaGs0)
                * (1 + 8 / 5 * eta * (3 * eta - 2) * sumAlphaGs0)
-           + 3 / 5 * eta * mu_b);
+           + 3 / 5 * eta * mu_b));
 
     return volScalarField::New(
         IOobject::groupName(Foam::typedName<viscosityModel>("nu"),

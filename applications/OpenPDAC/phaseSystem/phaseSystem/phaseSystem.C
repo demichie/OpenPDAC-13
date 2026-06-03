@@ -500,8 +500,8 @@ Foam::tmp<Foam::volScalarField> Foam::phaseSystem::alfasMax() const
                     if (&phaseModels_[phasej]
                         != &phaseModels_[continuousPhaseName_])
                     {
-                        volScalarField di = phaseModels_[phasei].d();
-                        volScalarField dj = phaseModels_[phasej].d();
+                        volScalarField di(phaseModels_[phasei].d());
+                        volScalarField dj(phaseModels_[phasej].d());
                         rij = pos0(di - dj) * dj / di + neg(di - dj) * di / dj;
 
                         pij = phaseModels_[phasei].alphaMax();
@@ -526,8 +526,8 @@ Foam::tmp<Foam::volScalarField> Foam::phaseSystem::alfasMax() const
                         }
                     }
                 }
-                volScalarField alfasMaxi =
-                    phaseModels_[phasei].alphaMax() * max(1.0, 1.0 / den);
+                volScalarField alfasMaxi(
+                    phaseModels_[phasei].alphaMax() * max(1.0, 1.0 / den));
 
                 polydisperseAlfasMax = min(polydisperseAlfasMax, alfasMaxi);
             }

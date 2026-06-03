@@ -136,17 +136,17 @@ Foam::kineticTheoryModels::frictionalStressModels::Schaeffer::
     // - for two identical split phases, each phase receives only its proper
     //   share of the total frictional pressure.
     const volScalarField& alpha = phase;
-    const volScalarField alphaTot = 1.0 - continuousPhase;
+    const volScalarField alphaTot(1.0 - continuousPhase);
 
     // Numerical safeguard to avoid division by zero in nearly empty cells.
     const dimensionedScalar alphaTotSmall("alphaTotSmall", dimless, SMALL);
-    const volScalarField alphaTotEff = max(alphaTot, alphaTotSmall);
+    const volScalarField alphaTotEff(max(alphaTot, alphaTotSmall));
 
     // Original Schaeffer total frictional pressure law, evaluated using the
     // total solids fraction.
-    const volScalarField pfTot =
+    const volScalarField pfTot(
         dimensionedScalar(dimensionSet(1, -1, -2, 0, 0), 1e24)
-        * pow(Foam::max(alphaTot - alphasMax, scalar(0)), 10.0);
+        * pow(Foam::max(alphaTot - alphasMax, scalar(0)), 10.0));
 
     // Per-species partition of the total frictional pressure.
     return (alpha / alphaTotEff) * pfTot;
@@ -163,12 +163,12 @@ Foam::kineticTheoryModels::frictionalStressModels::Schaeffer::
     // alpha    = volume fraction of the current solid phase "s"
     // alphaTot = total solid volume fraction
     const volScalarField& alpha = phase;
-    const volScalarField alphaTot = 1.0 - continuousPhase;
+    const volScalarField alphaTot(1.0 - continuousPhase);
 
     // Numerical safeguard to avoid division by zero in alpha/alphaTot and
     // in terms involving alphaTot^2 in the denominator.
     const dimensionedScalar alphaTotSmall("alphaTotSmall", dimless, SMALL);
-    const volScalarField alphaTotEff = max(alphaTot, alphaTotSmall);
+    const volScalarField alphaTotEff(max(alphaTot, alphaTotSmall));
 
     // Build the original total Schaeffer frictional pressure:
     //
@@ -178,18 +178,18 @@ Foam::kineticTheoryModels::frictionalStressModels::Schaeffer::
     // but now it is interpreted as the total frictional pressure of the solid
     // mixture rather than the pressure to be assigned independently to each
     // solid phase.
-    const volScalarField pfTot =
+    const volScalarField pfTot(
         dimensionedScalar(dimensionSet(1, -1, -2, 0, 0), 1e24)
-        * pow(Foam::max(alphaTot - alphasMax, scalar(0)), 10.0);
+        * pow(Foam::max(alphaTot - alphasMax, scalar(0)), 10.0));
 
     // Derivative of the total Schaeffer law with respect to alphaTot:
     //
     //   d(pfTot)/d(alphaTot) = 1e25 * max(alphaTot - alphasMax, 0)^9
     //
     // which is the same derivative already present in the original code.
-    const volScalarField pfTotPrime =
+    const volScalarField pfTotPrime(
         dimensionedScalar(dimensionSet(1, -1, -2, 0, 0), 1e25)
-        * pow(Foam::max(alphaTot - alphasMax, scalar(0)), 9.0);
+        * pow(Foam::max(alphaTot - alphasMax, scalar(0)), 9.0));
 
     // Main correction:
     //
@@ -236,7 +236,7 @@ Foam::kineticTheoryModels::frictionalStressModels::Schaeffer::nu(
     const volScalarField& rho,
     const volSymmTensorField& D) const
 {
-    const volScalarField alphas = 1.0 - continuousPhase;
+    const volScalarField alphas(1.0 - continuousPhase);
 
     /*
         Schaeffer frictional viscosity.

@@ -70,7 +70,7 @@ Foam::PtrList<Foam::volScalarField> Foam::radialModels::MansooriBoublick::g0(
     PtrList<volScalarField> g0_im(fluid.phases().size());
 
     volScalarField alphas = alphai;
-    volScalarField eta2 = alphai / phasei.d();
+    volScalarField eta2(alphai / phasei.d());
 
     forAll(fluid.phases(), phaseIdx)
     {
@@ -82,12 +82,12 @@ Foam::PtrList<Foam::volScalarField> Foam::radialModels::MansooriBoublick::g0(
         }
     }
 
-    const volScalarField denominatorTerm =
+    const volScalarField denominatorTerm(
         max(1.0
                 - alphas
                       / max(alphasMax,
                             dimensionedScalar("small", dimless, ROOTVSMALL)),
-            dimensionedScalar("small", dimless, ROOTVSMALL));
+            dimensionedScalar("small", dimless, ROOTVSMALL)));
 
     forAll(g0_im, iter)
     {
@@ -95,10 +95,10 @@ Foam::PtrList<Foam::volScalarField> Foam::radialModels::MansooriBoublick::g0(
 
         if (&phasem != &continuousPhase)
         {
-            const volScalarField di = phasei.d();
-            const volScalarField dm = phasem.d();
+            const volScalarField di(phasei.d());
+            const volScalarField dm(phasem.d());
             const dimensionedScalar smallD("smallD", dimLength, ROOTVSMALL);
-            volScalarField term_d = di * dm / (di + dm + smallD);
+            volScalarField term_d(di * dm / (di + dm + smallD));
 
             g0_im.set(iter,
                       new volScalarField(
@@ -129,7 +129,7 @@ Foam::radialModels::MansooriBoublick::g0prime(
     volScalarField alphas = phasei;
 
     // Mixture moment: eta2 = sum_j(alpha_j/d_j)
-    volScalarField eta2 = phasei / phasei.d();
+    volScalarField eta2(phasei / phasei.d());
 
     forAll(fluid.phases(), phaseIdx)
     {
@@ -155,11 +155,11 @@ Foam::radialModels::MansooriBoublick::g0prime(
 
     // Exact derivative of eta2 with respect to alpha_i:
     // d(eta2)/d(alpha_i) = 1/d_i
-    volScalarField dEta2dAlphai = scalar(1) / phasei.d();
+    volScalarField dEta2dAlphai(scalar(1) / phasei.d());
 
     // dD/dalpha_i = -1/alpha_s,max, switched off when the clamp is active
-    volScalarField dDdAlphai =
-        -activeDenom / max(alphasMax, scalar(ROOTVSMALL));
+    volScalarField dDdAlphai(
+        -activeDenom / max(alphasMax, scalar(ROOTVSMALL)));
 
     forAll(g0prime_im, iter)
     {
@@ -167,13 +167,13 @@ Foam::radialModels::MansooriBoublick::g0prime(
 
         if (&phasem != &continuousPhase)
         {
-            const volScalarField di = phasei.d();
-            const volScalarField dm = phasem.d();
+            const volScalarField di(phasei.d());
+            const volScalarField dm(phasem.d());
 
             // Pair-size factor:
             // t_im = d_i d_m / (d_i + d_m)
             const dimensionedScalar smallD("smallD", dimLength, ROOTVSMALL);
-            volScalarField term_d = di * dm / (di + dm + smallD);
+            volScalarField term_d(di * dm / (di + dm + smallD));
 
             // g0_{i,m} = 1/D + 3 t_im eta2 / D^2 + 2 t_im^2 eta2^2 / D^3
             // and g0prime_im[m] = d g0_{i,m} / d alpha_i

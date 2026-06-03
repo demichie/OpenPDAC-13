@@ -77,7 +77,7 @@ Foam::kineticTheoryModels::granularPressureModels::SyamlalRogersOBrien::
     volScalarField alpha1 = phase1;
     const phaseSystem& fluid = phase1.fluid();
 
-    volScalarField pCoeff = 0.0 * rho1;
+    volScalarField pCoeff(0.0 * rho1);
     dimensionedScalar eta = 0.5 * (1.0 + e);
 
     forAll(fluid.phases(), phasei)

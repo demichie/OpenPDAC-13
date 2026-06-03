@@ -200,15 +200,15 @@ void Foam::solvers::OpenPDAC::thermophysicalPredictor()
                 // physical value to prevent crashes from non-physical T.
                 volScalarField Tmin(continuousPhase.thermo().T());
                 Tmin = dimensionedScalar(dimTemperature, 273.0);
-                volScalarField heMin = phase.thermo().he(p_, Tmin);
+                volScalarField heMin(phase.thermo().he(p_, Tmin));
 
                 heNew =
                     pos(heNew - heMin) * heNew + neg0(heNew - heMin) * heMin;
             }
             else if (correctTdispersed) // This is a dispersed phase
             {
-                volScalarField heTcont =
-                    phase.thermo().he(p_, continuousPhase.thermo().T());
+                volScalarField heTcont(
+                    phase.thermo().he(p_, continuousPhase.thermo().T()));
 
                 heNew = pos(heNew) * heNew + neg0(heNew) * heTcont;
 
@@ -248,7 +248,7 @@ void Foam::solvers::OpenPDAC::thermophysicalPredictor()
                 const_cast<volScalarField&>(continuousPhase.thermo().he());
 
             // Calculate current DISPLACEMENT: Delta_h_k = tilde_h_{k+1} - h_k
-            volScalarField heDisplCurr = he - heStart;
+            volScalarField heDisplCurr(he - heStart);
 
             // Apply relaxation only if history exists (from 2nd iteration
             // onwards)
@@ -256,7 +256,7 @@ void Foam::solvers::OpenPDAC::thermophysicalPredictor()
             {
                 // Calculate the change in displacement: delta = Delta_h_k -
                 // Delta_h_{k-1}
-                volScalarField deltaDispl = heDisplCurr - heDisplPrev();
+                volScalarField deltaDispl(heDisplCurr - heDisplPrev());
 
                 // Compute scalar products using primitiveField() to avoid
                 // dimension checks

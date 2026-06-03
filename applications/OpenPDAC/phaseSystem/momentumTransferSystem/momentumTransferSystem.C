@@ -1267,14 +1267,14 @@ void Foam::momentumTransferSystem::dragEnergy
                 (
                     (otherPhase/max(otherPhase, otherPhase.residualAlpha()))*K
                 );
-                volVectorField dragForce = K1 * (j == -1 ? -Uphis[i] : (Uphis[j] - Uphis[i]));
+                volVectorField dragForce(K1 * (j == -1 ? -Uphis[i] : (Uphis[j] - Uphis[i])));
                 
                 const volVectorField& Umult = 
                     (phase.name() != continuousPhaseName) ? Uphis[i] :
                     (otherPhase.name() != continuousPhaseName) ? Uphis[j] :
                     volVectorField("Umult", 0.5 * (Uphis[i] + Uphis[j]));
 
-                volScalarField dragEnergy = (dragForce & Umult);
+                volScalarField dragEnergy((dragForce & Umult));
                 addField
                 (
                     i, 
@@ -1372,10 +1372,10 @@ void Foam::momentumTransferSystem::dragDissipation
                 (
                     (otherPhase/max(otherPhase, otherPhase.residualAlpha()))*K
                 );
-                volVectorField Urel = (j == -1 ? -Uphis[i] : (Uphis[j] - Uphis[i]));
+                volVectorField Urel((j == -1 ? -Uphis[i] : (Uphis[j] - Uphis[i])));
 
                 // initialize dissipation field
-                volScalarField dragDissipation = 0.0 * K1 * magSqr(Urel);
+                volScalarField dragDissipation(0.0 * K1 * magSqr(Urel));
 
                 // Case 1: Gas-Solid interaction
                 if (phase.name() == continuousPhaseName && j != -1) // gas phase

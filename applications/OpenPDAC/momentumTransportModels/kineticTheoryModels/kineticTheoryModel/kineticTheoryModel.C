@@ -349,7 +349,7 @@ void Foam::RASModels::kineticTheoryModel::correct()
     const volTensorField& gradU(tgradU());
     const volSymmTensorField D(symm(gradU));
 
-    volScalarField alphasMax_ = 0.0 * phase_;
+    volScalarField alphasMax_(0.0 * phase_);
 
     // Calculating the radial distribution function
 
@@ -368,7 +368,7 @@ void Foam::RASModels::kineticTheoryModel::correct()
         }
     }
 
-    const volScalarField alphas = 1.0 - continuousPhase;
+    const volScalarField alphas(1.0 - continuousPhase);
 
     // Drag
     const dispersedPhaseInterface interface(phase_, continuousPhase);

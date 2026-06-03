@@ -151,24 +151,24 @@ Foam::kineticTheoryModels::frictionalStressModels::JohnsonJacksonSchaeffer::
     //   a fraction of the total frictional pressure proportional to its own
     //   volume fraction.
     const volScalarField& alpha = phase;
-    const volScalarField alphaTot = 1.0 - continuousPhase;
+    const volScalarField alphaTot(1.0 - continuousPhase);
 
     // Numerical safeguard to avoid division by zero in nearly empty cells.
     // This regularization does not affect the normal solid-present regime,
     // but prevents singularities in the alpha/alphaTot ratio.
     const dimensionedScalar alphaTotSmall("alphaTotSmall", dimless, SMALL);
-    const volScalarField alphaTotEff = max(alphaTot, alphaTotSmall);
+    const volScalarField alphaTotEff(max(alphaTot, alphaTotSmall));
 
     // "Total" Johnson-Jackson/Schaeffer frictional pressure law:
     // this is the original model, evaluated as a function of the total
     // solid volume fraction.
-    const volScalarField alphaDiff =
-        max(alphaTot - alphaMinFriction, scalar(0));
-    const volScalarField gap = max(alphasMax - alphaTot, alphaDeltaMin_);
+    const volScalarField alphaDiff(
+        max(alphaTot - alphaMinFriction, scalar(0)));
+    const volScalarField gap(max(alphasMax - alphaTot, alphaDeltaMin_));
 
-    const volScalarField pfTot =
+    const volScalarField pfTot(
         min(Fr_ * pow(alphaDiff, eta_) / pow(gap, p_),
-            dimensionedScalar("maxPress", Fr_.dimensions(), 1e9));
+            dimensionedScalar("maxPress", Fr_.dimensions(), 1e9)));
 
     // Per-species correction:
     // only the alpha_s / alphaTot share of the total frictional pressure
@@ -186,12 +186,12 @@ Foam::kineticTheoryModels::frictionalStressModels::JohnsonJacksonSchaeffer::
     // alpha    = volume fraction of the current solid phase "s"
     // alphaTot = total solid volume fraction
     const volScalarField& alpha = phase;
-    const volScalarField alphaTot = 1.0 - continuousPhase;
+    const volScalarField alphaTot(1.0 - continuousPhase);
 
     // Numerical safeguard to avoid division by zero in alpha/alphaTot and
     // in terms involving alphaTot^2 in the denominator.
     const dimensionedScalar alphaTotSmall("alphaTotSmall", dimless, SMALL);
-    const volScalarField alphaTotEff = max(alphaTot, alphaTotSmall);
+    const volScalarField alphaTotEff(max(alphaTot, alphaTotSmall));
 
     // First build the original "total" frictional pressure:
     //
@@ -199,22 +199,22 @@ Foam::kineticTheoryModels::frictionalStressModels::JohnsonJacksonSchaeffer::
     //
     // i.e. the same law already present in the original code, expressed in
     // terms of the total solid volume fraction.
-    const volScalarField alphaDiff =
-        max(alphaTot - alphaMinFriction, scalar(0));
-    const volScalarField gap = max(alphasMax - alphaTot, alphaDeltaMin_);
+    const volScalarField alphaDiff(
+        max(alphaTot - alphaMinFriction, scalar(0)));
+    const volScalarField gap(max(alphasMax - alphaTot, alphaDeltaMin_));
 
-    const volScalarField pfTot =
+    const volScalarField pfTot(
         min(Fr_ * pow(alphaDiff, eta_) / pow(gap, p_),
-            dimensionedScalar("maxPress", Fr_.dimensions(), 1e9));
+            dimensionedScalar("maxPress", Fr_.dimensions(), 1e9)));
 
     // Derivative of the total frictional pressure law with respect to alphaTot.
     //
     // This is essentially the same derivative already used in the original
     // code.
-    const volScalarField pfTotPrime =
+    const volScalarField pfTotPrime(
         Fr_
         * (eta_ * pow(alphaDiff, eta_ - 1) * gap + p_ * pow(alphaDiff, eta_))
-        / pow(gap, p_ + 1);
+        / pow(gap, p_ + 1));
 
     // Main correction:
     //
@@ -259,7 +259,7 @@ Foam::kineticTheoryModels::frictionalStressModels::JohnsonJacksonSchaeffer::nu(
     const volScalarField& rho,
     const volSymmTensorField& D) const
 {
-    const volScalarField alphas = 1.0 - continuousPhase;
+    const volScalarField alphas(1.0 - continuousPhase);
 
     /*
         Johnson--Jackson frictional pressure with Schaeffer frictional

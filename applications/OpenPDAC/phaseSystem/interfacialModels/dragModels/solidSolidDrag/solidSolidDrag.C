@@ -52,7 +52,7 @@ Foam::dragModels::solidSolidDrag::KSolidSolid(const phaseModel& gas,
     const volScalarField& alphas2 = solid2;
     const scalar Pi = constant::mathematical::pi;
     const volScalarField magURel(mag(solid1.U() - solid2.U()));
-    const volScalarField alphasMax = fluid.alfasMax();
+    const volScalarField alphasMax(fluid.alfasMax());
     const word& continuousPhaseName = fluid.continuousPhaseName();
     const phaseModel& continuousPhase = fluid.phases()[continuousPhaseName];
 
@@ -66,14 +66,14 @@ Foam::dragModels::solidSolidDrag::KSolidSolid(const phaseModel& gas,
 
     // Eq. 16.5-43
     // https://www.afs.enea.it/project/neptunius/docs/fluent/html/th/node323.htm
-    volScalarField fractNum = 3.0 * (1.0 + E_)
+    volScalarField fractNum(3.0 * (1.0 + E_)
                             * (Pi / 2.0 + Cf_ * sqr(Pi) / 8.0) * alphas1
                             * solid1.rho() * alphas2 * solid2.rho()
-                            * sqr(solid1.d() + solid2.d()) * g0_12 * magURel;
+                            * sqr(solid1.d() + solid2.d()) * g0_12 * magURel);
 
-    volScalarField fractDen = 2.0 * Pi
+    volScalarField fractDen(2.0 * Pi
                             * (solid1.rho() * pow(solid1.d(), 3.0)
-                               + solid2.rho() * pow(solid2.d(), 3.0));
+                               + solid2.rho() * pow(solid2.d(), 3.0)));
 
     return (fractNum / fractDen);
 }

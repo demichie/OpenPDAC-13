@@ -70,7 +70,7 @@ Foam::radialModels::Lebowitz::g0(const phaseModel& phasei,
     PtrList<volScalarField> g0_im(fluid.phases().size());
 
     // S = sum_j(alpha_j/d_j) over all solid phases
-    volScalarField const_sum = alphai / phasei.d();
+    volScalarField const_sum(alphai / phasei.d());
 
     forAll(fluid.phases(), phaseIdx)
     {
@@ -117,7 +117,7 @@ Foam::radialModels::Lebowitz::g0prime(const phaseModel& phasei,
     PtrList<volScalarField> g0prime_im(fluid.phases().size());
 
     // S = sum_j(alpha_j/d_j) over all solid phases
-    volScalarField const_sum = alphai / phasei.d();
+    volScalarField const_sum(alphai / phasei.d());
 
     forAll(fluid.phases(), phaseIdx)
     {

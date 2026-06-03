@@ -77,7 +77,7 @@ Foam::kineticTheoryModels::viscosityModels::Gidaspow::nu(
 
     const dimensionedScalar eta = 0.5 * (1.0 + e);
 
-    const volScalarField mu = 5.0 / 96.0 * rho1 * da * sqrt(Theta) * sqrtPi;
+    const volScalarField mu(5.0 / 96.0 * rho1 * da * sqrt(Theta) * sqrtPi);
 
     /*
     MFIX/Gidaspow kinetic-collisional viscosity convention:
@@ -101,11 +101,11 @@ Foam::kineticTheoryModels::viscosityModels::Gidaspow::nu(
     The unused alpha1 argument is kept in the function signature for run-time
     selection compatibility with the other viscosity models.
     */
-    const volScalarField mu_b = 256.0 / (5.0 * Pi) * mu * sumAlphaGs0;
+    const volScalarField mu_b(256.0 / (5.0 * Pi) * mu * sumAlphaGs0);
 
-    const volScalarField mu_i =
+    const volScalarField mu_i(
         (mu / (g0 * eta) * sqr(1 + 8 / 5 * eta * sumAlphaGs0)
-         + 3 / 5 * eta * mu_b);
+         + 3 / 5 * eta * mu_b));
 
     return volScalarField::New(
         IOobject::groupName(Foam::typedName<viscosityModel>("nu"),

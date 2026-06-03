@@ -696,6 +696,12 @@ void Foam::phaseSystem::solve(const alphaControl& alphaControls,
                     }
                 }
             }
+            
+            // dopo scaling con internalFieldRef():
+            forAll(movingPhases(), movingPhasei)
+            {
+                 movingPhases()[movingPhasei].correctBoundaryConditions();
+            }
 
             if (alphaControls.MULESCorr)
             {
@@ -839,6 +845,8 @@ void Foam::phaseSystem::solve(const alphaControl& alphaControls,
                     }
                 }
             }
+            
+            phase.correctBoundaryConditions();
 
             Info << phase.name() << " after clip fraction: avg, min, max = "
                  << phase.weightedAverage(mesh_.Vsc()).value() << ' '
@@ -857,7 +865,7 @@ void Foam::phaseSystem::solve(const alphaControl& alphaControls,
         }
     }
 
-    volScalarField packingProximity = totalSolidAlpha - alfasMax();
+    volScalarField packingProximity(totalSolidAlpha - alfasMax());
 
     Info << "Packing proximity (sum(alpha) - alfasMax): "
          << "avg, min, max = "
@@ -890,6 +898,14 @@ void Foam::phaseSystem::solve(const alphaControl& alphaControls,
             referenceAlpha -= solvePhases[solvePhasei];
         }
     }
+
+    // ADDED 20260602    
+    forAll(phases(), phasei)
+    {
+        phases()[phasei].correctBoundaryConditions();
+        phases()[phasei].URef().correctBoundaryConditions();
+    }   
+    
 }
 
 
