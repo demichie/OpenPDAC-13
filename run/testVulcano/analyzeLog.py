@@ -47,6 +47,12 @@ RE_EXEC_CLOCK = re.compile(
 RE_COURANT = re.compile(
     r"^Courant Number mean: ([0-9Ee+\-\.]+) max: ([0-9Ee+\-\.]+)$"
 )
+RE_PHASE_MAX_MAG_U = re.compile(
+    r"^([A-Za-z0-9_]+) velocity: maxMagU = ([0-9Ee+\-\.]+)$"
+)
+RE_PHASE_MAX_MAG_UR = re.compile(
+    r"^([A-Za-z0-9_]+) relativeVelocity: maxMagUr = ([0-9Ee+\-\.]+)$"
+)
 RE_DELTA_T = re.compile(r"^deltaT = ([0-9Ee+\-\.]+)$")
 RE_PIMPLE_ITER = re.compile(r"^PIMPLE: Iteration ([0-9]+)$")
 RE_PIMPLE_NOT_CONVERGED = re.compile(
@@ -202,6 +208,8 @@ def initialize_step(
         "clock_time_s": pending.get("clock_time_s"),
         "courant_max": pending.get("courant_max"),
         "delta_t": pending.get("delta_t"),
+        "_phase_max_mag_u": dict(pending.get("_phase_max_mag_u", {})),
+        "_phase_max_mag_ur": dict(pending.get("_phase_max_mag_ur", {})),
         "p_min": None,
         "p_max": None,
         "last_p_ratio": None,
@@ -328,6 +336,8 @@ def finalize_step(step: Dict[str, object]) -> Dict[str, object]:
     phase_fraction = flat.pop("_phase_fraction")
     phase_fraction_after_clip = flat.pop("_phase_fraction_after_clip")
     phase_theta = flat.pop("_phase_theta")
+    phase_max_mag_u = flat.pop("_phase_max_mag_u", {})
+    phase_max_mag_ur = flat.pop("_phase_max_mag_ur", {})
     scalar_initial_residuals = flat.pop("_scalar_initial_residuals")
     scalar_linear_iterations = flat.pop("_scalar_linear_iterations")
     energy_initial_residuals_by_pimple = flat.pop(
@@ -370,6 +380,14 @@ def finalize_step(step: Dict[str, object]) -> Dict[str, object]:
         flat[f"{token}_theta_avg"] = values.get("avg")
         flat[f"{token}_theta_min"] = values.get("min")
         flat[f"{token}_theta_max"] = values.get("max")
+
+    for phase, value in phase_max_mag_u.items():
+        token = sanitize(phase)
+        flat[f"{token}_max_mag_u"] = value
+
+    for phase, value in phase_max_mag_ur.items():
+        token = sanitize(phase)
+        flat[f"{token}_max_mag_ur"] = value
 
     for variable, phase_map in energy_initial_residuals_by_pimple.items():
         var_token = sanitize(variable)
@@ -435,6 +453,8 @@ def parse_log(log_path: Path) -> Tuple[pd.DataFrame, List[str], Optional[str]]:
         "clock_time_s": None,
         "courant_max": None,
         "delta_t": None,
+        "_phase_max_mag_u": {},
+        "_phase_max_mag_ur": {},
     }
 
     steps: List[Dict[str, object]] = []
@@ -458,6 +478,20 @@ def parse_log(log_path: Path) -> Tuple[pd.DataFrame, List[str], Optional[str]]:
             match = RE_COURANT.match(line)
             if match:
                 pending["courant_max"] = to_float(match.group(2))
+                continue
+
+            match = RE_PHASE_MAX_MAG_U.match(line)
+            if match:
+                phase = match.group(1)
+                phases.add(phase)
+                pending["_phase_max_mag_u"][phase] = to_float(match.group(2))
+                continue
+
+            match = RE_PHASE_MAX_MAG_UR.match(line)
+            if match:
+                phase = match.group(1)
+                phases.add(phase)
+                pending["_phase_max_mag_ur"][phase] = to_float(match.group(2))
                 continue
 
             match = RE_DELTA_T.match(line)
@@ -1453,6 +1487,92 @@ def plot_pimple(df: pd.DataFrame, output_dir: Path) -> None:
         save_figure(fig, output_dir / "pimple_residual_ratio")
 
 
+def plot_velocity_diagnostics(
+    df: pd.DataFrame,
+    output_dir: Path,
+    phases: List[str],
+) -> None:
+    """Generate phase-velocity and slip-velocity diagnostic plots.
+
+    Args:
+        df: DataFrame containing one row per physical time step.
+        output_dir: Directory where figures are written.
+        phases: Names of the detected phases.
+
+    Returns:
+        None.
+    """
+    has_phase_velocity = any(
+        f"{sanitize(phase)}_max_mag_u" in df.columns
+        and df[f"{sanitize(phase)}_max_mag_u"].notna().any()
+        for phase in phases
+    )
+
+    if has_phase_velocity:
+        fig, ax = plt.subplots(figsize=(10, 5))
+        styles = phase_styles(phases, "tab10", 0.0, 1.0)
+        plotted = False
+
+        for phase in phases:
+            token = sanitize(phase)
+            column = f"{token}_max_mag_u"
+            if column in df.columns and df[column].notna().any():
+                style = styles[phase]
+                ax.plot(
+                    df["time"],
+                    df[column],
+                    label=f"{phase} max |U|",
+                    linewidth=LINE_WIDTH,
+                    color=style["color"],
+                    linestyle=style["linestyle"],
+                )
+                plotted = True
+
+        if plotted:
+            ax.set_ylabel("Max phase speed [m/s]")
+            ax.set_title("Phase velocity diagnostics")
+            apply_common_style(ax)
+            ax.legend(frameon=True, ncol=2)
+            save_figure(fig, output_dir / "velocity_phase_max")
+        else:
+            plt.close(fig)
+
+    has_relative_velocity = any(
+        f"{sanitize(phase)}_max_mag_ur" in df.columns
+        and df[f"{sanitize(phase)}_max_mag_ur"].notna().any()
+        for phase in phases
+    )
+
+    if has_relative_velocity:
+        fig, ax = plt.subplots(figsize=(10, 5))
+        styles = phase_styles(phases, "tab10", 0.0, 1.0)
+        plotted = False
+
+        for phase in phases:
+            token = sanitize(phase)
+            column = f"{token}_max_mag_ur"
+            if column in df.columns and df[column].notna().any():
+                style = styles[phase]
+                ax.plot(
+                    df["time"],
+                    df[column],
+                    label=f"{phase} max |U - Uc|",
+                    linewidth=LINE_WIDTH,
+                    color=style["color"],
+                    linestyle=style["linestyle"],
+                )
+                plotted = True
+
+        if plotted:
+            ax.set_ylabel("Max slip speed [m/s]")
+            ax.set_title("Dispersed-phase relative-velocity diagnostics")
+            apply_common_style(ax)
+            ax.legend(frameon=True, ncol=2)
+            save_figure(fig, output_dir / "velocity_relative_max")
+        else:
+            plt.close(fig)
+
+
 def make_all_plots(
     df: pd.DataFrame,
     output_dir: Path,
@@ -1472,6 +1592,7 @@ def make_all_plots(
     """
     plot_performance(df, output_dir)
     plot_stability(df, output_dir)
+    plot_velocity_diagnostics(df, output_dir, phases)
     plot_pressure(df, output_dir)
     plot_energy(df, output_dir, phases, energy_variable)
     plot_min_temp_oscillations(df, output_dir, phases)
