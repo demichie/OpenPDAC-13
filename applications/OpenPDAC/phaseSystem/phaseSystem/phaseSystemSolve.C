@@ -892,14 +892,12 @@ void Foam::phaseSystem::solve(const alphaControl& alphaControls,
     }
 
     // ADDED 20260602
-    // Synchronise phase volume fields after OpenPDAC clipping/scaling
-    // operations, including cell-wise solid packing corrections.
-    // This is required for coupled/processor patches before the next
-    // pressure-momentum correction.
+    // Synchronise phase fractions after the alpha/MULES solve.
+    // This is required in parallel because subsequent momentum/pressure
+    // corrections use the coupled/processor patch values of the phase fields.
     forAll(phases(), phasei)
     {
         phases()[phasei].correctBoundaryConditions();
-        phases()[phasei].URef().correctBoundaryConditions();
     }
     // END ADDED 20260602
 }
