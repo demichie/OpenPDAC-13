@@ -157,8 +157,7 @@ Foam::kineticTheoryModels::frictionalStressModels::JohnsonJackson::
 
     // Original Johnson-Jackson total frictional pressure law, evaluated
     // using the total solids fraction.
-    const volScalarField alphaDiff(
-        max(alphaTot - alphaMinFriction, scalar(0)));
+    const volScalarField alphaDiff(max(alphaTot - alphaMinFriction, scalar(0)));
     const volScalarField gap(max(alphasMax - alphaTot, alphaDeltaMin_));
 
     const volScalarField pfTot(Fr_ * pow(alphaDiff, eta_) / pow(gap, p_));
@@ -192,8 +191,7 @@ Foam::kineticTheoryModels::frictionalStressModels::JohnsonJackson::
     // This is the same law already used in the original implementation,
     // but now interpreted as the total frictional pressure of the solid
     // mixture rather than the pressure assigned independently to each phase.
-    const volScalarField alphaDiff(
-        max(alphaTot - alphaMinFriction, scalar(0)));
+    const volScalarField alphaDiff(max(alphaTot - alphaMinFriction, scalar(0)));
     const volScalarField gap(max(alphasMax - alphaTot, alphaDeltaMin_));
 
     const volScalarField pfTot(Fr_ * pow(alphaDiff, eta_) / pow(gap, p_));

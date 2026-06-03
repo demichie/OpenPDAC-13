@@ -526,8 +526,8 @@ Foam::tmp<Foam::volScalarField> Foam::phaseSystem::alfasMax() const
                         }
                     }
                 }
-                volScalarField alfasMaxi(
-                    phaseModels_[phasei].alphaMax() * max(1.0, 1.0 / den));
+                volScalarField alfasMaxi(phaseModels_[phasei].alphaMax()
+                                         * max(1.0, 1.0 / den));
 
                 polydisperseAlfasMax = min(polydisperseAlfasMax, alfasMaxi);
             }

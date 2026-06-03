@@ -162,8 +162,7 @@ Foam::kineticTheoryModels::frictionalStressModels::JohnsonJacksonSchaeffer::
     // "Total" Johnson-Jackson/Schaeffer frictional pressure law:
     // this is the original model, evaluated as a function of the total
     // solid volume fraction.
-    const volScalarField alphaDiff(
-        max(alphaTot - alphaMinFriction, scalar(0)));
+    const volScalarField alphaDiff(max(alphaTot - alphaMinFriction, scalar(0)));
     const volScalarField gap(max(alphasMax - alphaTot, alphaDeltaMin_));
 
     const volScalarField pfTot(
@@ -199,8 +198,7 @@ Foam::kineticTheoryModels::frictionalStressModels::JohnsonJacksonSchaeffer::
     //
     // i.e. the same law already present in the original code, expressed in
     // terms of the total solid volume fraction.
-    const volScalarField alphaDiff(
-        max(alphaTot - alphaMinFriction, scalar(0)));
+    const volScalarField alphaDiff(max(alphaTot - alphaMinFriction, scalar(0)));
     const volScalarField gap(max(alphasMax - alphaTot, alphaDeltaMin_));
 
     const volScalarField pfTot(

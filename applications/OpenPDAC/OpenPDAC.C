@@ -181,7 +181,7 @@ void Foam::solvers::OpenPDAC::correctCoNum()
         Info << "Courant Number mean: " << meanCoNum << " max: " << CoNum_
              << endl;
     }
-    
+
     // Velocity diagnostics written next to the Courant diagnostic so they
     // can be parsed as time-step-control quantities by the log-analysis tool.
     const word& continuousPhaseName = fluid.continuousPhaseName();
@@ -198,8 +198,8 @@ void Foam::solvers::OpenPDAC::correctCoNum()
         {
             const scalar maxMagUr = max(mag(phase.U() - Uc)).value();
 
-            Info << phase.name()
-                 << " relativeVelocity: maxMagUr = " << maxMagUr << endl;
+            Info << phase.name() << " relativeVelocity: maxMagUr = " << maxMagUr
+                 << endl;
         }
     }
 }
@@ -374,8 +374,8 @@ Foam::solvers::OpenPDAC::OpenPDAC(fvMesh& mesh)
 
     // Mixture viscosity
     volScalarField alphaS(1.0 - max(0.0, phases[continuousPhaseName]));
-    volScalarField base(
-        1.0 - min(alphaS / (alphasMax + ROOTVSMALL), 1.0 - 1.0e-6));
+    volScalarField base(1.0
+                        - min(alphaS / (alphasMax + ROOTVSMALL), 1.0 - 1.0e-6));
 
     muMix = muC * pow(base, -1.55);
 
@@ -632,8 +632,8 @@ void Foam::solvers::OpenPDAC::postSolve()
         max(fluid_.alfasMax(), dimensionedScalar(dimless, 0.01)));
     const word& continuousPhaseName = fluid.continuousPhaseName();
 
-    volScalarField alphaS(
-        1.0 - max(0.0, min(1.0, phases[continuousPhaseName])));
+    volScalarField alphaS(1.0
+                          - max(0.0, min(1.0, phases[continuousPhaseName])));
     volScalarField base(max(0.01, 1.0 - alphaS / alphasMax));
 
     const volScalarField& muC(phases[continuousPhaseName].fluidThermo().mu());

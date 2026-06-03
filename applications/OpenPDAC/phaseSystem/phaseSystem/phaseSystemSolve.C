@@ -696,12 +696,6 @@ void Foam::phaseSystem::solve(const alphaControl& alphaControls,
                     }
                 }
             }
-            
-            // dopo scaling con internalFieldRef():
-            forAll(movingPhases(), movingPhasei)
-            {
-                 movingPhases()[movingPhasei].correctBoundaryConditions();
-            }
 
             if (alphaControls.MULESCorr)
             {
@@ -845,8 +839,6 @@ void Foam::phaseSystem::solve(const alphaControl& alphaControls,
                     }
                 }
             }
-            
-            phase.correctBoundaryConditions();
 
             Info << phase.name() << " after clip fraction: avg, min, max = "
                  << phase.weightedAverage(mesh_.Vsc()).value() << ' '
@@ -899,13 +891,17 @@ void Foam::phaseSystem::solve(const alphaControl& alphaControls,
         }
     }
 
-    // ADDED 20260602    
+    // ADDED 20260602
+    // Synchronise phase volume fields after OpenPDAC clipping/scaling
+    // operations, including cell-wise solid packing corrections.
+    // This is required for coupled/processor patches before the next
+    // pressure-momentum correction.
     forAll(phases(), phasei)
     {
         phases()[phasei].correctBoundaryConditions();
         phases()[phasei].URef().correctBoundaryConditions();
-    }   
-    
+    }
+    // END ADDED 20260602
 }
 
 

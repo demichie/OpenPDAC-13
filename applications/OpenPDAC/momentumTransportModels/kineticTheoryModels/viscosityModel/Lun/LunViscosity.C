@@ -113,10 +113,9 @@ Foam::kineticTheoryModels::viscosityModels::Lun::nu(
     */
     const volScalarField betaByAlpha(beta / alpha1);
 
-    const volScalarField muStar(
-        (rho1 * g0 * Theta * mu)
-       /(rho1 * sumAlphaGs0 * (Theta + ThetaSmall)
-         + (2 * betaByAlpha * mu) / rho1));
+    const volScalarField muStar((rho1 * g0 * Theta * mu)
+                                / (rho1 * sumAlphaGs0 * (Theta + ThetaSmall)
+                                   + (2 * betaByAlpha * mu) / rho1));
 
     // Eq. B4 MFIX2012, using the unweighted muStar and mu_b defined above.
     const volScalarField mu_i(
