@@ -60,8 +60,6 @@ Foam::dragModels::NonSphericalErgun::~NonSphericalErgun() {}
 Foam::tmp<Foam::volScalarField>
 Foam::dragModels::NonSphericalErgun::CdRe() const
 {
-    const phaseModel& continuous = interface_.continuous();
-
     const volScalarField alphaG(
         max(interface_.continuous(), interface_.continuous().residualAlpha()));
 

@@ -185,7 +185,8 @@ void Foam::solvers::OpenPDAC::correctCoNum()
     // Velocity diagnostics written next to the Courant diagnostic so they
     // can be parsed as time-step-control quantities by the log-analysis tool.
     const word& continuousPhaseName = fluid.continuousPhaseName();
-    const volVectorField& Uc = phases[continuousPhaseName].U();
+    const tmp<volVectorField> tUc(phases[continuousPhaseName].U());
+    const volVectorField& Uc = tUc();
 
     forAll(movingPhases, movingPhasei)
     {
