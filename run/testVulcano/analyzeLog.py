@@ -47,6 +47,12 @@ RE_EXEC_CLOCK = re.compile(
 RE_COURANT = re.compile(
     r"^Courant Number mean: ([0-9Ee+\-\.]+) max: ([0-9Ee+\-\.]+)$"
 )
+RE_PHASE_MAX_MAG_U = re.compile(
+    r"^([A-Za-z0-9_]+) velocity: maxMagU = ([0-9Ee+\-\.]+)$"
+)
+RE_PHASE_MAX_MAG_UR = re.compile(
+    r"^([A-Za-z0-9_]+) relativeVelocity: maxMagUr = ([0-9Ee+\-\.]+)$"
+)
 RE_DELTA_T = re.compile(r"^deltaT = ([0-9Ee+\-\.]+)$")
 RE_PIMPLE_ITER = re.compile(r"^PIMPLE: Iteration ([0-9]+)$")
 RE_PIMPLE_NOT_CONVERGED = re.compile(
@@ -202,6 +208,8 @@ def initialize_step(
         "clock_time_s": pending.get("clock_time_s"),
         "courant_max": pending.get("courant_max"),
         "delta_t": pending.get("delta_t"),
+        "_phase_max_mag_u": dict(pending.get("_phase_max_mag_u", {})),
+        "_phase_max_mag_ur": dict(pending.get("_phase_max_mag_ur", {})),
         "p_min": None,
         "p_max": None,
         "last_p_ratio": None,
@@ -328,6 +336,8 @@ def finalize_step(step: Dict[str, object]) -> Dict[str, object]:
     phase_fraction = flat.pop("_phase_fraction")
     phase_fraction_after_clip = flat.pop("_phase_fraction_after_clip")
     phase_theta = flat.pop("_phase_theta")
+    phase_max_mag_u = flat.pop("_phase_max_mag_u", {})
+    phase_max_mag_ur = flat.pop("_phase_max_mag_ur", {})
     scalar_initial_residuals = flat.pop("_scalar_initial_residuals")
     scalar_linear_iterations = flat.pop("_scalar_linear_iterations")
     energy_initial_residuals_by_pimple = flat.pop(
@@ -370,6 +380,14 @@ def finalize_step(step: Dict[str, object]) -> Dict[str, object]:
         flat[f"{token}_theta_avg"] = values.get("avg")
         flat[f"{token}_theta_min"] = values.get("min")
         flat[f"{token}_theta_max"] = values.get("max")
+
+    for phase, value in phase_max_mag_u.items():
+        token = sanitize(phase)
+        flat[f"{token}_max_mag_u"] = value
+
+    for phase, value in phase_max_mag_ur.items():
+        token = sanitize(phase)
+        flat[f"{token}_max_mag_ur"] = value
 
     for variable, phase_map in energy_initial_residuals_by_pimple.items():
         var_token = sanitize(variable)
@@ -435,6 +453,8 @@ def parse_log(log_path: Path) -> Tuple[pd.DataFrame, List[str], Optional[str]]:
         "clock_time_s": None,
         "courant_max": None,
         "delta_t": None,
+        "_phase_max_mag_u": {},
+        "_phase_max_mag_ur": {},
     }
 
     steps: List[Dict[str, object]] = []
@@ -458,6 +478,20 @@ def parse_log(log_path: Path) -> Tuple[pd.DataFrame, List[str], Optional[str]]:
             match = RE_COURANT.match(line)
             if match:
                 pending["courant_max"] = to_float(match.group(2))
+                continue
+
+            match = RE_PHASE_MAX_MAG_U.match(line)
+            if match:
+                phase = match.group(1)
+                phases.add(phase)
+                pending["_phase_max_mag_u"][phase] = to_float(match.group(2))
+                continue
+
+            match = RE_PHASE_MAX_MAG_UR.match(line)
+            if match:
+                phase = match.group(1)
+                phases.add(phase)
+                pending["_phase_max_mag_ur"][phase] = to_float(match.group(2))
                 continue
 
             match = RE_DELTA_T.match(line)
@@ -1229,9 +1263,9 @@ def plot_volume_fractions(
 ) -> None:
     """Generate volume-fraction, packing, and theta diagnostic plots.
 
-    Volume-fraction extrema and packing-proximity diagnostics are written
-    to separate figures because they usually have very different ranges and
-    physical interpretations.
+    Volume-fraction average/extrema and packing-proximity diagnostics are
+    written to separate figures because they usually have very different
+    ranges and physical interpretations.
 
     Args:
         df: DataFrame containing one row per physical time step.
@@ -1241,7 +1275,7 @@ def plot_volume_fractions(
     Returns:
         None.
     """
-    # Phase volume-fraction extrema only.
+    # Phase volume-fraction average and extrema.
     fig, ax = plt.subplots(figsize=(10, 5))
     plotted = False
     styles = phase_styles(phases, "tab20", 0.0, 1.0)
@@ -1249,6 +1283,18 @@ def plot_volume_fractions(
     for phase in phases:
         token = sanitize(phase)
         style = styles[phase]
+
+        avg_column = f"{token}_fraction_avg"
+        if avg_column in df.columns and df[avg_column].notna().any():
+            ax.plot(
+                df["time"],
+                df[avg_column],
+                label=f"{phase} fraction avg",
+                linewidth=LINE_WIDTH,
+                color=style["color"],
+                linestyle=style["linestyle"],
+            )
+            plotted = True
 
         min_column = f"{token}_fraction_min"
         if min_column in df.columns and df[min_column].notna().any():
@@ -1258,7 +1304,7 @@ def plot_volume_fractions(
                 label=f"{phase} fraction min",
                 linewidth=LINE_WIDTH,
                 color=style["color"],
-                linestyle=style["linestyle"],
+                linestyle=":",
             )
             plotted = True
 
@@ -1276,7 +1322,7 @@ def plot_volume_fractions(
 
     if plotted:
         ax.set_ylabel("Volume fraction [-]")
-        ax.set_title("Volume-fraction extrema")
+        ax.set_title("Volume-fraction diagnostics")
         apply_common_style(ax)
         ax.legend(frameon=True, ncol=2)
         save_figure(fig, output_dir / "fractions_diagnostics")
@@ -1285,9 +1331,7 @@ def plot_volume_fractions(
 
     # Packing proximity in a separate figure.
     packing_columns = [
-        ("packing_proximity_avg", "Packing proximity avg", "-"),
-        ("packing_proximity_min", "Packing proximity min", "--"),
-        ("packing_proximity_max", "Packing proximity max", ":"),
+        ("packing_proximity_max", "Packing proximity max", "-"),
     ]
     has_packing_proximity = any(
         column in df.columns and df[column].notna().any()
@@ -1453,6 +1497,292 @@ def plot_pimple(df: pd.DataFrame, output_dir: Path) -> None:
         save_figure(fig, output_dir / "pimple_residual_ratio")
 
 
+def plot_velocity_diagnostics(
+    df: pd.DataFrame,
+    output_dir: Path,
+    phases: List[str],
+) -> None:
+    """Generate phase-velocity and slip-velocity diagnostic plots.
+
+    Args:
+        df: DataFrame containing one row per physical time step.
+        output_dir: Directory where figures are written.
+        phases: Names of the detected phases.
+
+    Returns:
+        None.
+    """
+    has_phase_velocity = any(
+        f"{sanitize(phase)}_max_mag_u" in df.columns
+        and df[f"{sanitize(phase)}_max_mag_u"].notna().any()
+        for phase in phases
+    )
+
+    if has_phase_velocity:
+        fig, ax = plt.subplots(figsize=(10, 5))
+        styles = phase_styles(phases, "tab10", 0.0, 1.0)
+        plotted = False
+
+        for phase in phases:
+            token = sanitize(phase)
+            column = f"{token}_max_mag_u"
+            if column in df.columns and df[column].notna().any():
+                style = styles[phase]
+                ax.plot(
+                    df["time"],
+                    df[column],
+                    label=f"{phase} max |U|",
+                    linewidth=LINE_WIDTH,
+                    color=style["color"],
+                    linestyle=style["linestyle"],
+                )
+                plotted = True
+
+        if plotted:
+            ax.set_ylabel("Max phase speed [m/s]")
+            ax.set_title("Phase velocity diagnostics")
+            apply_common_style(ax)
+            ax.legend(frameon=True, ncol=2)
+            save_figure(fig, output_dir / "velocity_phase_max")
+        else:
+            plt.close(fig)
+
+    has_relative_velocity = any(
+        f"{sanitize(phase)}_max_mag_ur" in df.columns
+        and df[f"{sanitize(phase)}_max_mag_ur"].notna().any()
+        for phase in phases
+    )
+
+    if has_relative_velocity:
+        fig, ax = plt.subplots(figsize=(10, 5))
+        styles = phase_styles(phases, "tab10", 0.0, 1.0)
+        plotted = False
+
+        for phase in phases:
+            token = sanitize(phase)
+            column = f"{token}_max_mag_ur"
+            if column in df.columns and df[column].notna().any():
+                style = styles[phase]
+                ax.plot(
+                    df["time"],
+                    df[column],
+                    label=f"{phase} max |U - Uc|",
+                    linewidth=LINE_WIDTH,
+                    color=style["color"],
+                    linestyle=style["linestyle"],
+                )
+                plotted = True
+
+        if plotted:
+            ax.set_ylabel("Max slip speed [m/s]")
+            ax.set_title("Dispersed-phase relative-velocity diagnostics")
+            apply_common_style(ax)
+            ax.legend(frameon=True, ncol=2)
+            save_figure(fig, output_dir / "velocity_relative_max")
+        else:
+            plt.close(fig)
+
+
+def select_physical_correlation_columns(
+    df: pd.DataFrame,
+    phases: List[str],
+) -> Dict[str, str]:
+    """Select final-time-step physical diagnostics for correlation plots.
+
+    Only a compact subset of physical quantities already represented in the
+    time-series plots is selected. Solver diagnostics, time-step controls,
+    Courant number, all volume-fraction columns, theta minima, and theta
+    averages are intentionally excluded. The retained concentration proxy is
+    packing_proximity_max.
+
+    Args:
+        df: DataFrame containing one row per physical time step.
+        phases: Names of the detected phases.
+
+    Returns:
+        Dictionary mapping DataFrame column names to compact plot labels.
+    """
+    candidates: Dict[str, str] = {}
+
+    base_columns = {
+        "p_min": "p min",
+        "p_max": "p max",
+        "packing_proximity_max": "packing prox max",
+    }
+
+    for column, label in base_columns.items():
+        if column in df.columns and df[column].notna().any():
+            candidates[column] = label
+
+    for phase in phases:
+        token = sanitize(phase)
+        phase_columns = {
+            f"{token}_t_min": f"{phase} T min",
+            f"{token}_t_max": f"{phase} T max",
+            # Volume fractions are intentionally excluded from the
+            # correlation heatmaps. The compact concentration diagnostic
+            # retained here is packing_proximity_max.
+            #
+            # Theta minima are also excluded because they are often dominated
+            # by lower bounds/floors and add little information to the
+            # physical correlation matrix.
+            f"{token}_theta_max": f"{phase} theta max",
+            f"{token}_max_mag_u": f"{phase} max |U|",
+            f"{token}_max_mag_ur": f"{phase} max |Ur|",
+        }
+
+        for column, label in phase_columns.items():
+            if column in df.columns and df[column].notna().any():
+                candidates[column] = label
+
+    return candidates
+
+
+def plot_correlation_heatmap(
+    df: pd.DataFrame,
+    output_dir: Path,
+    column_labels: Dict[str, str],
+    method: str,
+) -> None:
+    """Plot a correlation heatmap for selected physical diagnostics.
+
+    Args:
+        df: DataFrame containing one row per physical time step.
+        output_dir: Directory where figures are written.
+        column_labels: Mapping between DataFrame columns and plot labels.
+        method: Correlation method accepted by pandas, e.g. ``pearson`` or
+            ``spearman``.
+
+    Returns:
+        None.
+    """
+    if len(column_labels) < 2:
+        return
+
+    selected = df[list(column_labels.keys())].copy()
+    selected = selected.apply(pd.to_numeric, errors="coerce")
+
+    usable_columns = []
+    for column in selected.columns:
+        series = selected[column].dropna()
+        if len(series) >= 3:
+            usable_columns.append(column)
+
+    if len(usable_columns) < 2:
+        return
+
+    selected = selected[usable_columns]
+    corr = selected.corr(method=method, min_periods=3)
+
+    # Keep constant columns, such as a clipped or nearly constant p_min, in the
+    # plot. Their correlation coefficients are undefined and are shown as n/a
+    # instead of silently removing the variable from the heatmap.
+    labels = [column_labels[column] for column in selected.columns]
+    corr = corr.reindex(index=selected.columns, columns=selected.columns)
+
+    size = max(7.0, 0.55 * len(labels) + 3.0)
+
+    fig, ax = plt.subplots(figsize=(size, size))
+    image = ax.imshow(corr.values, vmin=-1.0, vmax=1.0, cmap="coolwarm")
+
+    ax.set_xticks(range(len(labels)))
+    ax.set_yticks(range(len(labels)))
+    ax.set_xticklabels(labels, rotation=45, ha="right")
+    ax.set_yticklabels(labels)
+
+    for i in range(len(labels)):
+        for j in range(len(labels)):
+            value = corr.values[i, j]
+            text = f"{value:.2f}" if pd.notna(value) else "n/a"
+            ax.text(
+                j,
+                i,
+                text,
+                ha="center",
+                va="center",
+                fontsize=7,
+            )
+
+    ax.set_title(f"Physical-variable correlation ({method})")
+    fig.colorbar(image, ax=ax, label="Correlation coefficient [-]")
+    save_figure(fig, output_dir / f"correlation_physical_{method}")
+
+
+def plot_physical_correlations(
+    df: pd.DataFrame,
+    output_dir: Path,
+    phases: List[str],
+) -> None:
+    """Generate correlation plots for final-time-step physical diagnostics.
+
+    Args:
+        df: DataFrame containing one row per physical time step.
+        output_dir: Directory where figures are written.
+        phases: Names of the detected phases.
+
+    Returns:
+        None.
+    """
+    column_labels = select_physical_correlation_columns(df, phases)
+
+    plot_correlation_heatmap(
+        df=df,
+        output_dir=output_dir,
+        column_labels=column_labels,
+        method="pearson",
+    )
+    plot_correlation_heatmap(
+        df=df,
+        output_dir=output_dir,
+        column_labels=column_labels,
+        method="spearman",
+    )
+
+
+def filter_time_window(
+    df: pd.DataFrame,
+    start_time: Optional[float],
+    end_time: Optional[float],
+) -> pd.DataFrame:
+    """Filter a diagnostics DataFrame by physical time.
+
+    Args:
+        df: DataFrame containing one row per physical time step.
+        start_time: Optional lower bound for physical time [s].
+        end_time: Optional upper bound for physical time [s].
+
+    Returns:
+        Filtered DataFrame with per-step execution/clock increments recomputed
+        inside the selected window.
+
+    Raises:
+        ValueError: If ``end_time`` is smaller than ``start_time``.
+        RuntimeError: If no rows remain after filtering.
+    """
+    if start_time is not None and end_time is not None and end_time < start_time:
+        raise ValueError("end-time must be greater than or equal to start-time.")
+
+    filtered = df
+    if start_time is not None:
+        filtered = filtered[filtered["time"] >= start_time]
+    if end_time is not None:
+        filtered = filtered[filtered["time"] <= end_time]
+
+    filtered = filtered.sort_values("time").reset_index(drop=True).copy()
+
+    if filtered.empty:
+        raise RuntimeError(
+            "No time steps remain after applying the selected time window."
+        )
+
+    if "execution_time_s" in filtered.columns:
+        filtered["execution_time_step_s"] = filtered["execution_time_s"].diff()
+    if "clock_time_s" in filtered.columns:
+        filtered["clock_time_step_s"] = filtered["clock_time_s"].diff()
+
+    return filtered
+
+
 def make_all_plots(
     df: pd.DataFrame,
     output_dir: Path,
@@ -1472,10 +1802,12 @@ def make_all_plots(
     """
     plot_performance(df, output_dir)
     plot_stability(df, output_dir)
+    plot_velocity_diagnostics(df, output_dir, phases)
     plot_pressure(df, output_dir)
     plot_energy(df, output_dir, phases, energy_variable)
     plot_min_temp_oscillations(df, output_dir, phases)
     plot_volume_fractions(df, output_dir, phases)
+    plot_physical_correlations(df, output_dir, phases)
     plot_pimple(df, output_dir)
 
 
@@ -1507,6 +1839,18 @@ def build_argument_parser() -> argparse.ArgumentParser:
         default="log_diagnostics.csv",
         help="Name of the output CSV file.",
     )
+    parser.add_argument(
+        "--start-time",
+        type=float,
+        default=None,
+        help="Initial physical time for the analysis [s].",
+    )
+    parser.add_argument(
+        "--end-time",
+        type=float,
+        default=None,
+        help="Final physical time for the analysis [s].",
+    )
     return parser
 
 
@@ -1535,11 +1879,18 @@ def main() -> None:
     print("Parsing log in streaming mode...")
 
     dataframe, phases, energy_variable = parse_log(log_path)
+    parsed_steps = len(dataframe)
+    dataframe = filter_time_window(
+        dataframe,
+        start_time=args.start_time,
+        end_time=args.end_time,
+    )
 
     csv_path = output_dir / args.csv_name
     dataframe.to_csv(csv_path, index=False)
 
-    print(f"Parsed {len(dataframe)} physical time steps.")
+    print(f"Parsed {parsed_steps} physical time steps before filtering.")
+    print(f"Using {len(dataframe)} physical time steps for analysis.")
     print(f"Detected phases: {', '.join(phases) if phases else 'none'}")
     print(f"Detected energy variable: {energy_variable if energy_variable else 'none'}")
     print(f"CSV file written to: {csv_path}")
