@@ -1217,6 +1217,28 @@ int main(int argc, char* argv[])
         const scalar coeffVertDeformation =
             topoDict.lookupOrDefault<scalar>("coeffVertDeformation", 1.0);
 
+        // Optional flattening of the vertical displacement below z=0.
+        // Near z=0 the local interpolated displacement is preserved; toward
+        // the original global minimum mesh z it tends to the topographic
+        // elevation at (flattenBottomX, flattenBottomY).
+        const Switch flattenBottom =
+            topoDict.lookupOrDefault<Switch>("flattenBottom", false);
+        const scalar flattenBottomX =
+            topoDict.lookupOrDefault<scalar>("flattenBottomX", 0.0);
+        const scalar flattenBottomY =
+            topoDict.lookupOrDefault<scalar>("flattenBottomY", 0.0);
+        const scalar flattenBottomExp =
+            topoDict.lookupOrDefault<scalar>("flattenBottomExp", 2.0);
+
+        if (flattenBottom && flattenBottomExp <= SMALL)
+        {
+            FatalErrorInFunction
+                << "flattenBottomExp must be greater than zero"
+                << exit(FatalError);
+        }
+
+        scalar dzFlat = 0.0;
+
         scalarList zNeg, dxNeg, dyNeg;
         bool useNegDeformation = true;
         // --- End original declarations ---
@@ -1349,6 +1371,55 @@ int main(int argc, char* argv[])
         }
         file.close();
 
+        if (flattenBottom)
+        {
+            // Reference flat displacement: topographic elevation at the
+            // user-selected point. Since the bottom reference surface is z=0,
+            // this is also the vertical displacement to use as the deep,
+            // laterally uniform limit.
+            const scalar x_grid = (flattenBottomX - xllcorner) / cellsize - 0.5;
+            const scalar y_grid = (flattenBottomY - yllcorner) / cellsize - 0.5;
+
+            const label colIndex = static_cast<label>(floor(x_grid));
+            const label rowIndex = static_cast<label>(floor(y_grid));
+
+            if (colIndex >= 0 && colIndex < ncols - 1
+                && rowIndex >= 0 && rowIndex < nrows - 1)
+            {
+                const scalar xLerp = x_grid - colIndex;
+                const scalar yLerp = y_grid - rowIndex;
+
+                const scalar v00 = elevation(rowIndex, colIndex);
+                const scalar v01 = elevation(rowIndex, colIndex + 1);
+                const scalar v10 = elevation(rowIndex + 1, colIndex);
+                const scalar v11 = elevation(rowIndex + 1, colIndex + 1);
+
+                dzFlat =
+                    v00 * (1 - xLerp) * (1 - yLerp)
+                  + v01 * xLerp * (1 - yLerp)
+                  + v10 * (1 - xLerp) * yLerp
+                  + v11 * xLerp * yLerp;
+
+                Info << "flattenBottom enabled" << endl;
+                Info << "flattenBottomX = " << flattenBottomX << endl;
+                Info << "flattenBottomY = " << flattenBottomY << endl;
+                Info << "flattenBottomExp = " << flattenBottomExp << endl;
+                Info << "Deep flat vertical displacement dzFlat = "
+                     << dzFlat << endl;
+            }
+            else
+            {
+                FatalErrorInFunction
+                    << "flattenBottom point (" << flattenBottomX << ", "
+                    << flattenBottomY << ") out of DEM bounds "
+                    << "x_grid: " << x_grid << ", y_grid: " << y_grid
+                    << ", colIndex: " << colIndex
+                    << ", rowIndex: " << rowIndex
+                    << ", ncols: " << ncols << ", nrows: " << nrows
+                    << exit(FatalError);
+            }
+        }
+
         scalar xMin = min(mesh.Cf().component(0)).value();
         scalar xMax = max(mesh.Cf().component(0)).value();
         reduce(xMin, minOp<scalar>());
@@ -1428,6 +1499,23 @@ int main(int argc, char* argv[])
         const scalarField magFaceAreas(mag(faceAreas));
         const faceList& faces = mesh.faces();
         const pointField& points = mesh.points();
+
+        scalar zFlatten = great;
+        forAll(points, pointi)
+        {
+            zFlatten = min(zFlatten, points[pointi].z());
+        }
+        reduce(zFlatten, minOp<scalar>());
+        Info << "zFlatten = global minimum original mesh point z = "
+             << zFlatten << endl;
+
+        if (flattenBottom && zFlatten >= -SMALL)
+        {
+            FatalErrorInFunction
+                << "flattenBottom requires at least one mesh point below z=0. "
+                << "The global minimum mesh point z is " << zFlatten
+                << exit(FatalError);
+        }
 
         scalar minLenSqr = sqr(great);
         scalar maxLenSqr = -sqr(great);
@@ -2026,7 +2114,24 @@ int main(int argc, char* argv[])
                                                              globalAreas,
                                                              interpRelRadius,
                                                              distThr);
-                    interpDz = result.first();
+                    scalar dzLocal = result.first();
+
+                    if (flattenBottom && pEval.z() < 0.0)
+                    {
+                        scalar s = pEval.z() / zFlatten;
+                        s = min(1.0, max(0.0, s));
+
+                        const scalar flattenWeight =
+                            Foam::pow(1.0 - s, flattenBottomExp);
+
+                        interpDz =
+                            flattenWeight * dzLocal
+                          + (1.0 - flattenWeight) * dzFlat;
+                    }
+                    else
+                    {
+                        interpDz = dzLocal;
+                    }
 
                     if (orthogonalCorrection)
                     {
