@@ -3284,6 +3284,47 @@ int main(int argc, char* argv[])
         // --- END OF BEST MESH LOGIC ---
     }
 
+    const Switch shiftMinZToZero =
+        topoDict.lookupOrDefault<Switch>("shiftMinZToZero", false);
+
+    if (shiftMinZToZero)
+    {
+        scalar zMinFinal = great;
+
+        const pointField& finalPoints = mesh.points();
+        forAll(finalPoints, pointi)
+        {
+            zMinFinal = min(zMinFinal, finalPoints[pointi].z());
+        }
+        reduce(zMinFinal, minOp<scalar>());
+
+        Info << "Shifting final mesh vertically so that global min(z) is 0"
+             << endl;
+        Info << "  - Global final min(z) before shift: " << zMinFinal << endl;
+        Info << "  - Applied vertical shift: " << -zMinFinal << endl;
+
+        pointField shiftedPoints(mesh.points());
+        forAll(shiftedPoints, pointi)
+        {
+            shiftedPoints[pointi].z() -= zMinFinal;
+        }
+
+        syncTools::syncPointPositions(
+            mesh, shiftedPoints, maxEqOp<point>(), point::zero);
+
+        mesh.movePoints(shiftedPoints);
+
+        scalar zMinCheck = great;
+        const pointField& shiftedCheckPoints = mesh.points();
+        forAll(shiftedCheckPoints, pointi)
+        {
+            zMinCheck = min(zMinCheck, shiftedCheckPoints[pointi].z());
+        }
+        reduce(zMinCheck, minOp<scalar>());
+
+        Info << "  - Global final min(z) after shift: " << zMinCheck << endl;
+    }
+
     Info << "Writing new mesh" << endl;
     mesh.setInstance("constant");
     mesh.write();
