@@ -172,16 +172,30 @@ PIMPLE
 relaxationFactors
 {
     fields
-    {
-        p_rgh           0.3; // Rilassamento forte per la pressione
-    }
+      {
+        p_rgh              0.5;
+        p_rghFinal         1.0;
+
+        "(h|e).*"          0.5;
+        "(h|e).*Final"     1.0;
+      }
+
     equations
-    {
-        "U.*"               0.7; // Rilassamento per la velocità
-        "(h|e).*"       0.7; // Rilassamento per l'energia/entalpia
-        "(k|epsilon).*" 0.7; // Buona pratica: rilassare anche la turbolenza
-    }
+      {
+        "U.*"              0.7;
+        "U.*Final"         1.0;
+
+        "(h|e).*"          0.5;
+        "(h|e).*Final"     1.0;
+
+        "Theta.*"          0.5;
+        "Theta.*Final"     1.0;
+
+        "(k|epsilon).*"    0.7;
+        "(k|epsilon).*Final" 1.0;
+      }
 }
+
 
 
 
