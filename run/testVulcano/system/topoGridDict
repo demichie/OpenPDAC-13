@@ -43,6 +43,9 @@ flattenBottomY 0.0;
 // default: 2.0
 flattenBottomExp 1.0;
 
+// Shift mesh vertically to have min(z)=0
+shiftMinZToZero true;
+
 
 // Relative search radius used when interpolating DEM face-centre elevations to
 // z=0 mesh points.  Values close to 1 behave like nearest-neighbour sampling;
