@@ -129,8 +129,8 @@ Foam::kineticTheoryModels::conductivityModels::Gidaspow::kappa(
     // identical phases, each split phase receives a conductivity proportional
     // to its own alpha_i. The sum of the two split conductivities then
     // reconstructs the unsplit conductivity.
-    const volScalarField kappaStarStar(
-        (75.0 * rho1 * da * sqrtPi * sqrt(Theta)) / (384.0 * eta));
+    const volScalarField kappaStarStar((75.0 * rho1 * da * sqrtPi * sqrt(Theta))
+                                       / (384.0 * eta));
 
     // Split-consistent polydisperse Gidaspow conductivity without drag
     // correction:

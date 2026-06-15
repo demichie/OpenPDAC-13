@@ -32,6 +32,21 @@ rasterFile output_file.asc;
 xVent 496665.0;
 yVent 4250680.0;
 
+flattenBottom true;
+
+// coordinate dove calcolare la quota topografica piatta profonda
+// default: (0, 0)
+flattenBottomX 0.0;
+flattenBottomY 0.0;
+
+// forma della transizione verticale
+// default: 2.0
+flattenBottomExp 1.0;
+
+// Shift mesh vertically to have min(z)=0
+shiftMinZToZero true;
+
+
 // Relative search radius used when interpolating DEM face-centre elevations to
 // z=0 mesh points.  Values close to 1 behave like nearest-neighbour sampling;
 // larger values smooth the terrain seen by the mesh.  A typical value is 4-8.

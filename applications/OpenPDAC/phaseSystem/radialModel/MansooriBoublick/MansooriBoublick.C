@@ -158,8 +158,7 @@ Foam::radialModels::MansooriBoublick::g0prime(
     volScalarField dEta2dAlphai(scalar(1) / phasei.d());
 
     // dD/dalpha_i = -1/alpha_s,max, switched off when the clamp is active
-    volScalarField dDdAlphai(
-        -activeDenom / max(alphasMax, scalar(ROOTVSMALL)));
+    volScalarField dDdAlphai(-activeDenom / max(alphasMax, scalar(ROOTVSMALL)));
 
     forAll(g0prime_im, iter)
     {

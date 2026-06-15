@@ -54,6 +54,13 @@ void Foam::solvers::OpenPDAC::facePressureCorrector()
     volScalarField& p(p_);
     volScalarField& p_rgh = p_rgh_;
 
+    volScalarField rho("rho", fluid.rho());
+
+    // Correct p_rgh for consistency with the current density
+    // p_rgh = p - rho*buoyancy.gh - buoyancy.pRef;
+    p_rgh = p - rho * buoyancy.gh;
+
+
     // Face volume fractions
     PtrList<surfaceScalarField> alphafs(phases.size());
     forAll(phases, phasei)
@@ -103,7 +110,7 @@ void Foam::solvers::OpenPDAC::facePressureCorrector()
         invADVfs = momentumTransferSystem_.invADVfs(Afs, HVmfs);
     }
 
-    volScalarField rho("rho", fluid.rho());
+    rho = fluid.rho();
 
     // Phase diagonal coefficients
     PtrList<surfaceScalarField> alphaByADfs;
@@ -425,7 +432,7 @@ void Foam::solvers::OpenPDAC::facePressureCorrector()
 
                     MRF.makeRelative(phase.phiRef());
                     fvc::makeRelative(phase.phiRef(), phase.U());
-                    
+
                     phase.URef() = fvc::reconstruct(
                         fvc::absolute(MRF.absolute(phase.phi()), phase.U()));
 

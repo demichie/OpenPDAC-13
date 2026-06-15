@@ -85,8 +85,8 @@ Foam::PtrList<Foam::volScalarField> Foam::radialModels::SinclairJackson::g0(
 
     volScalarField alphas(1.0 - continuousPhase);
 
-    volScalarField g0(
-        1.0 / (1 - cbrt(min(alphas, alphaMinFriction) / alphasMax)));
+    volScalarField g0(1.0
+                      / (1 - cbrt(min(alphas, alphaMinFriction) / alphasMax)));
 
     forAll(fluid.phases(), phaseIdx)
     {
