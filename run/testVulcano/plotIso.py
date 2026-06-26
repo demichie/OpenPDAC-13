@@ -39,6 +39,9 @@ import pandas as pd
 
 # Default frame rate for the output videos (frames per second).
 DEFAULT_FRAMERATE = 10
+# Default number of intermediate camera frames for the 360-degree orbit.
+# A value of 1 preserves the original behavior.
+DEFAULT_ORBIT_FRAME_MULTIPLIER = 1
 # Default resolution for the output videos (width, height) in pixels.
 DEFAULT_VIDEO_RESOLUTION = (1920, 1080)
 # Default number of parallel processes to use for rendering.
@@ -81,6 +84,17 @@ parser.add_argument(
     help=f"Framerate for the output videos (default: {DEFAULT_FRAMERATE}).")
 
 parser.add_argument(
+    "--fm", "--orbit_frame_multiplier",
+    type=int,
+    default=DEFAULT_ORBIT_FRAME_MULTIPLIER,
+    help=("Number of camera frames to render for each simulation timestep "
+          "in the 360-degree orbit video. The same VTK/CSV data are reused "
+          "with intermediate camera rotations. The orbit video is assembled "
+          "at framerate * multiplier so its duration stays unchanged. "
+          f"Default: {DEFAULT_ORBIT_FRAME_MULTIPLIER}.")
+)
+
+parser.add_argument(
     "--ps", "--particle_scale",
     type=float,
     default=1.0,
@@ -107,6 +121,8 @@ args = parser.parse_args()
 
 # Framerate for the final videos.
 FRAMERATE = args.fr if args.fr is not None else DEFAULT_FRAMERATE
+# Number of intermediate camera frames per simulation timestep in the orbit video.
+ORBIT_FRAME_MULTIPLIER = max(1, args.fm)
 # Number of parallel processes for rendering. Capped by the number of CPU cores.
 NUM_PROCESSES = args.np if args.np is not None else DEFAULT_NUM_PROCESSES
 NUM_PROCESSES = max(1, min(NUM_PROCESSES, cpu_count()))
@@ -480,26 +496,40 @@ def assemble_video_from_frames(frames_input_dir, video_output_path, framerate_va
 def create_animation_sequence(base_camera_view, rotation_angle_degrees=None, use_circular_orbit=False, sequence_base_name="video_seq"):
     """
     Manages the entire process of rendering and assembling a video sequence.
+
+    For the 360-degree orbit, ORBIT_FRAME_MULTIPLIER can render additional
+    intermediate camera positions for each simulation timestep. The VTK and CSV
+    data are intentionally reused for these intermediate frames; only the camera
+    angle changes.
     """
     current_sequence_frames_dir = os.path.join(OUTPUT_FRAMES_ROOT_DIR, sequence_base_name)
     os.makedirs(current_sequence_frames_dir, exist_ok=True)
     print(f"\nPreparing frames for sequence: '{sequence_base_name}' in '{current_sequence_frames_dir}'")
-    num_animation_frames = len(iso4_vtk_files)
-    if num_animation_frames == 0:
+
+    num_data_frames = len(iso4_vtk_files)
+    frame_multiplier = ORBIT_FRAME_MULTIPLIER if use_circular_orbit else 1
+    num_animation_frames = num_data_frames * frame_multiplier
+
+    if num_data_frames == 0:
         print("No frames to render. Skipping."); return
+
     worker_tasks_list = []
-    for i in range(num_animation_frames):
-        current_sim_time = simulation_timesteps[i]
+    for render_frame_index in range(num_animation_frames):
+        data_index = render_frame_index // frame_multiplier
+        current_sim_time = simulation_timesteps[data_index]
         current_camera_for_frame = base_camera_view
+
         if use_circular_orbit:
-            orbit_angle_deg = 360.0 * i / num_animation_frames
+            orbit_angle_deg = 360.0 * render_frame_index / num_animation_frames
             current_camera_for_frame = rotate_view_around_focal_point(base_camera_view, orbit_angle_deg)
         elif rotation_angle_degrees is not None:
             current_camera_for_frame = rotate_view_around_focal_point(base_camera_view, rotation_angle_degrees)
-        output_png_filepath = os.path.join(current_sequence_frames_dir, f"frame_{i:04d}.png")
+
+        output_png_filepath = os.path.join(current_sequence_frames_dir, f"frame_{render_frame_index:04d}.png")
         particle_file_for_frame = particle_data_map.get(current_sim_time, None)
         task_arg_tuple = (
-            i, num_animation_frames, iso4_vtk_files[i], iso6_vtk_files[i],
+            render_frame_index, num_animation_frames,
+            iso4_vtk_files[data_index], iso6_vtk_files[data_index],
             current_sim_time, current_camera_for_frame, output_png_filepath,
             terrain_mesh, texture_exists_globally, TEXTURE_IMAGE_PATH,
             terrain_color_fallback if not texture_exists_globally else None,
@@ -507,6 +537,11 @@ def create_animation_sequence(base_camera_view, rotation_angle_degrees=None, use
             global_particle_diameter_range, SHOW_COLORBAR
         )
         worker_tasks_list.append(task_arg_tuple)
+
+    if use_circular_orbit and frame_multiplier > 1:
+        print(f"Orbit smoothing enabled: {frame_multiplier} camera frames per timestep ")
+        print(f"  Data timesteps: {num_data_frames}; rendered orbit frames: {num_animation_frames}")
+
     print(f"Rendering {num_animation_frames} frames for '{sequence_base_name}' using {NUM_PROCESSES} processes...")
     start_time = time.time()
     with Pool(processes=NUM_PROCESSES) as frame_pool:
@@ -517,12 +552,14 @@ def create_animation_sequence(base_camera_view, rotation_angle_degrees=None, use
     if rendered_files_count != num_animation_frames:
         print(f"Warning: Expected {num_animation_frames} frames, got {rendered_files_count}.")
     final_video_path = os.path.join(OUTPUT_VIDEOS_ROOT_DIR, f"{sequence_base_name}.mp4")
-    assemble_video_from_frames(current_sequence_frames_dir, final_video_path, FRAMERATE)
+    video_framerate = FRAMERATE * frame_multiplier if use_circular_orbit else FRAMERATE
+    assemble_video_from_frames(current_sequence_frames_dir, final_video_path, video_framerate)
 
 # ----- MAIN EXECUTION SCRIPT -----
 
 if __name__ == "__main__":
     print(f"Script started. Using {NUM_PROCESSES} processes for rendering at {FRAMERATE} FPS.")
+    print(f"Orbit frame multiplier: {ORBIT_FRAME_MULTIPLIER}x")
     print(f"Particle diameter scale factor: {PARTICLE_SCALE_FACTOR}x")
     print(f"Particle colormap: '{PARTICLE_CMAP}'")
     print(f"Show particle colorbar: {SHOW_COLORBAR}")
