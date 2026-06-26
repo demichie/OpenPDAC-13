@@ -19,6 +19,7 @@ from matplotlib.ticker import FuncFormatter
 # Global default values that can be overridden by CLI args
 DEFAULT_RASTER_RESOLUTION = 50.0  # Was 'step_dens' globally
 PARTICLE_IMPACT_VELOCITY_THRESHOLD = 1.0  # Was 'toll' globally
+DEFAULT_STOP_DISTANCE_TOLERANCE = 1.0e-6
 
 
 def log_to_percent_formatter(x, pos):
@@ -150,6 +151,20 @@ def parse_arguments():
         type=int,
         default=None,
         help="Number of columns in the output raster grid (optional).")
+    parser.add_argument(
+        "--sdt", "--stop_distance_tolerance",
+        type=float,
+        default=DEFAULT_STOP_DISTANCE_TOLERANCE,
+        help=("Distance tolerance [m] used to decide whether a particle has "
+              "the same final position in consecutive outputs. Default: "
+              f"{DEFAULT_STOP_DISTANCE_TOLERANCE:g}."))
+    parser.add_argument(
+        "--map-mode",
+        choices=["deposited", "depositedEscaped"],
+        default="depositedEscaped",
+        help=("Particle statuses to include in raster maps. Use 'deposited' "
+              "to map only deposited particles, or 'depositedEscaped' to map "
+              "both deposited and escaped particles. Default: depositedEscaped."))
     # --np argument removed as per request
     return parser.parse_args()
 
@@ -371,40 +386,123 @@ def main():
                           global_idx] = LA.norm(A_velocity[global_idx, :,
                                                            i_time])
 
-    print("Calculating impact times...")
-    t_impact_idx = np.zeros(nballistics_global, dtype=int)
-    time_impact_val = np.zeros(nballistics_global, dtype=float)
+    print("Calculating last-seen status and final-position plateau...")
+    stop_distance_tolerance = args.sdt
+    print(f"Stop distance tolerance: {stop_distance_tolerance:g} m")
+
+    # For every particle we store its last available record in the CSV series.
+    # The status column then distinguishes particles that are still present at
+    # the final output from particles that disappeared earlier, which are
+    # interpreted as escaped/removed from the cloud.
+    last_seen_idx = np.full(nballistics_global, -1, dtype=int)
+    first_valid_idx = np.full(nballistics_global, -1, dtype=int)
+    final_valid_idx = np.full(nballistics_global, -1, dtype=int)
+    first_stationary_idx = np.full(nballistics_global, -1, dtype=int)
+    last_moving_idx = np.full(nballistics_global, -1, dtype=int)
+    n_valid_outputs = np.zeros(nballistics_global, dtype=int)
+    last_seen_time = np.full(nballistics_global, np.nan, dtype=float)
+    first_stationary_time = np.full(nballistics_global, np.nan, dtype=float)
+    final_plateau_length = np.zeros(nballistics_global, dtype=int)
+    last_moving_to_final_distance = np.full(nballistics_global, np.nan)
+    status = np.full(nballistics_global, "noValid", dtype=object)
+
+    final_output_idx = n_times - 1
 
     for s_global_idx in range(nballistics_global):
-        for l_time_idx in range(3, n_times):
-            current_vel_norm = matr_data[l_time_idx, 7, s_global_idx]
-            prev_Uz = matr_data[l_time_idx - 1, 6, s_global_idx]
+        pos_series = B_position[s_global_idx, :, :]
+        valid_position_mask = np.all(~np.isnan(pos_series), axis=0)
+        valid_indices = np.where(valid_position_mask)[0]
 
-            if not np.isnan(current_vel_norm) and not np.isnan(prev_Uz):
-                if (current_vel_norm < PARTICLE_IMPACT_VELOCITY_THRESHOLD
-                        and prev_Uz < 0):
-                    t_impact_idx[s_global_idx] = l_time_idx
-                    time_impact_val[s_global_idx] = sorted_times[l_time_idx]
-                    break
+        if valid_indices.size == 0:
+            continue
 
-    print("Calculating mean and max velocities...")
-    velocities_summary = np.full((nballistics_global, 4), np.nan)
+        first_idx = valid_indices[0]
+        final_idx = valid_indices[-1]
+        first_valid_idx[s_global_idx] = first_idx
+        final_valid_idx[s_global_idx] = final_idx
+        last_seen_idx[s_global_idx] = final_idx
+        n_valid_outputs[s_global_idx] = valid_indices.size
+        last_seen_time[s_global_idx] = sorted_times[final_idx]
+
+        final_position = pos_series[:, final_idx]
+
+        # Walk backward from the last seen particle position and find the
+        # beginning of the final constant-position plateau. For particles still
+        # present at the final output this is the deposition time. For particles
+        # that disappear earlier it is only the beginning of the last observed
+        # stationary segment, if any.
+        plateau_start_idx = final_idx
+        for idx in valid_indices[-2::-1]:
+            dist_from_final = LA.norm(pos_series[:, idx] - final_position)
+            if dist_from_final <= stop_distance_tolerance:
+                plateau_start_idx = idx
+            else:
+                last_moving_idx[s_global_idx] = idx
+                last_moving_to_final_distance[s_global_idx] = dist_from_final
+                break
+
+        first_stationary_idx[s_global_idx] = plateau_start_idx
+        first_stationary_time[s_global_idx] = sorted_times[plateau_start_idx]
+        final_plateau_length[s_global_idx] = int(
+            np.sum(valid_indices >= plateau_start_idx))
+
+        disappeared_before_final_output = final_idx < final_output_idx
+
+        if disappeared_before_final_output:
+            # A parcel that is not present in the last CSV output has been
+            # removed from the cloud before the final output. In the current
+            # wall-interaction setup this is interpreted as escaped/removed,
+            # independently of whether it had a short stationary segment before
+            # disappearing.
+            status[s_global_idx] = "escaped"
+        else:
+            # The parcel is still present in the final CSV output. If the last
+            # observed position differs from the previous available position,
+            # the final position is not part of a stationary plateau, so the
+            # parcel is still moving at the final time. Otherwise it belongs to
+            # the final stationary plateau and is treated as deposited.
+            if valid_indices.size == 1:
+                status[s_global_idx] = "stillMoving"
+            elif final_plateau_length[s_global_idx] <= 1:
+                status[s_global_idx] = "stillMoving"
+            else:
+                status[s_global_idx] = "deposited"
+
+    n_with_last_seen = int(np.sum(last_seen_idx >= 0))
+    n_with_motion_before_last_seen = int(np.sum(last_moving_idx >= 0))
+    print(f"Particles with a last-seen position: {n_with_last_seen} / {nballistics_global}")
+    print("Particles with at least one earlier different position: "
+          f"{n_with_motion_before_last_seen} / {nballistics_global}")
+
+    print("Calculating min, mean and max velocities before last-seen/deposit...")
+    velocities_summary = np.full((nballistics_global, 5), np.nan)
     for k_global_idx in range(nballistics_global):
         velocities_summary[k_global_idx, 0] = k_global_idx
         velocities_summary[k_global_idx, 1] = d_global[k_global_idx]
-        impact_timestep_index = t_impact_idx[k_global_idx]
-        if impact_timestep_index > 0:
-            particle_vel_norms_trajectory = matr_data[:impact_timestep_index +
-                                                      1, 7, k_global_idx]
+
+        # Use velocities up to the last moving index when there is a final
+        # stationary plateau. If the particle disappears while still moving,
+        # use all valid velocity samples up to the last seen output.
+        if last_moving_idx[k_global_idx] >= 0:
+            velocity_end_idx = last_moving_idx[k_global_idx]
+        else:
+            velocity_end_idx = last_seen_idx[k_global_idx]
+
+        if velocity_end_idx >= 0:
+            particle_vel_norms_trajectory = matr_data[:velocity_end_idx + 1, 7,
+                                                      k_global_idx]
             valid_vels = particle_vel_norms_trajectory[
                 ~np.isnan(particle_vel_norms_trajectory)]
             if len(valid_vels) > 0:
-                velocities_summary[k_global_idx, 2] = np.mean(valid_vels)
-                velocities_summary[k_global_idx, 3] = np.amax(valid_vels)
+                velocities_summary[k_global_idx, 2] = np.amin(valid_vels)
+                velocities_summary[k_global_idx, 3] = np.mean(valid_vels)
+                velocities_summary[k_global_idx, 4] = np.amax(valid_vels)
 
     C_vel_headers = [
-        'global_index', 'diameter [m]', 'mean_velocity [m/s]',
-        'max_velocity [m/s]'
+        'global_index', 'diameter [m]',
+        'min_velocity_before_last_seen_or_deposit [m/s]',
+        'mean_velocity_before_last_seen_or_deposit [m/s]',
+        'max_velocity_before_last_seen_or_deposit [m/s]'
     ]
     df_velocities = pd.DataFrame(velocities_summary)
     df_velocities[0] = df_velocities[0].astype(int)
@@ -415,65 +513,98 @@ def main():
                          na_rep='NaN')
     print(f"Velocities summary saved to: {velocities_csv_path}")
 
-    print("Calculating impact properties...")
+    print("Calculating last-seen particle properties...")
     r_global = d_global / 2.0
     V_global = (4.0 / 3.0) * np.pi * (r_global**3)
     m_global = rho_global * V_global
-    impact_properties_matrix = np.full((nballistics_global, 9), np.nan)
 
-    for s_global_idx in range(nballistics_global):
-        impact_properties_matrix[s_global_idx, 0] = s_global_idx
-        current_impact_timestep_idx = t_impact_idx[s_global_idx]
-        if current_impact_timestep_idx > 0:
-            impact_properties_matrix[s_global_idx, 1:4] = [
-                d_global[s_global_idx], rho_global[s_global_idx],
-                time_impact_val[s_global_idx]
-            ]
-            # x, y, z
-            impact_properties_matrix[s_global_idx, 4:7] = matr_data[
-                current_impact_timestep_idx, 1:4, s_global_idx]
-            if current_impact_timestep_idx - 1 >= 0:
-                impact_velocity_norm = matr_data[current_impact_timestep_idx -
-                                                 1, 7, s_global_idx]
-                impact_properties_matrix[s_global_idx,
-                                         7] = impact_velocity_norm
-                if not np.isnan(impact_velocity_norm) and not np.isnan(
-                        m_global[s_global_idx]):
-                    impact_properties_matrix[s_global_idx, 8] = 0.5 * \
-                        m_global[s_global_idx] * (impact_velocity_norm**2)
+    impact_rows = []
+    for s_global_idx, particle_id in enumerate(unique_global_particle_identifiers):
+        orig_proc, orig_id = particle_id
+        row = {
+            'global_index': int(s_global_idx),
+            'origProc': int(orig_proc),
+            'origId': int(orig_id),
+            'status': status[s_global_idx],
+            'diameter [m]': d_global[s_global_idx],
+            'density [kg/m3]': rho_global[s_global_idx],
+            'first_timestep_index': int(first_valid_idx[s_global_idx]),
+            'first_time [s]': np.nan,
+            'last_seen_timestep_index': int(last_seen_idx[s_global_idx]),
+            'last_seen_time [s]': last_seen_time[s_global_idx],
+            'x_last_seen [m]': np.nan,
+            'y_last_seen [m]': np.nan,
+            'z_last_seen [m]': np.nan,
+            'last_seen_velocity_norm [m/s]': np.nan,
+            'last_seen_kinetic_energy [J]': np.nan,
+            'stationary_start_timestep_index': int(first_stationary_idx[s_global_idx]),
+            'stationary_start_time [s]': first_stationary_time[s_global_idx],
+            'last_moving_timestep_index': int(last_moving_idx[s_global_idx]),
+            'last_moving_time [s]': np.nan,
+            'last_moving_velocity_norm [m/s]': np.nan,
+            'last_moving_kinetic_energy [J]': np.nan,
+            'final_plateau_length_outputs': int(final_plateau_length[s_global_idx]),
+            'last_moving_to_last_seen_distance [m]': last_moving_to_final_distance[s_global_idx],
+            'n_csv_appearances': int(n_valid_outputs[s_global_idx]),
+        }
 
-    C_impact_headers = [
-        'global_index', 'diameter [m]', 'density [kg/m3]', 'impact_time [s]',
-        'x_impact [m]', 'y_impact [m]', 'z_impact [m]',
-        'impact_velocity_norm [m/s]', 'landing_energy [J]'
-    ]
-    df_impacts = pd.DataFrame(impact_properties_matrix)
-    df_impacts[0] = df_impacts[0].astype(int)
+        if first_valid_idx[s_global_idx] >= 0:
+            row['first_time [s]'] = sorted_times[first_valid_idx[s_global_idx]]
+
+        lsi = last_seen_idx[s_global_idx]
+        if lsi >= 0:
+            row['x_last_seen [m]'] = matr_data[lsi, 1, s_global_idx]
+            row['y_last_seen [m]'] = matr_data[lsi, 2, s_global_idx]
+            row['z_last_seen [m]'] = matr_data[lsi, 3, s_global_idx]
+            last_seen_vel_norm = matr_data[lsi, 7, s_global_idx]
+            row['last_seen_velocity_norm [m/s]'] = last_seen_vel_norm
+            if not np.isnan(last_seen_vel_norm) and not np.isnan(m_global[s_global_idx]):
+                row['last_seen_kinetic_energy [J]'] = 0.5 * m_global[s_global_idx] * (last_seen_vel_norm**2)
+
+        lmi = last_moving_idx[s_global_idx]
+        if lmi >= 0:
+            row['last_moving_time [s]'] = sorted_times[lmi]
+            last_moving_vel_norm = matr_data[lmi, 7, s_global_idx]
+            row['last_moving_velocity_norm [m/s]'] = last_moving_vel_norm
+            if not np.isnan(last_moving_vel_norm) and not np.isnan(m_global[s_global_idx]):
+                row['last_moving_kinetic_energy [J]'] = 0.5 * m_global[s_global_idx] * (last_moving_vel_norm**2)
+
+        impact_rows.append(row)
+
+    df_impacts = pd.DataFrame(impact_rows)
     impacts_csv_path = os.path.join(postprocessing_dir, "impacts.csv")
     df_impacts.to_csv(impacts_csv_path,
-                      header=C_impact_headers,
                       index=False,
                       na_rep='NaN')
-    print(f"Impact properties saved to: {impacts_csv_path}")
+    print(f"Particle last-seen/status properties saved to: {impacts_csv_path}")
+    print("Status counts:")
+    for status_name, count in df_impacts['status'].value_counts().items():
+        print(f"  {status_name}: {count}")
 
-    filtered_impact_data = impact_properties_matrix[
-        ~np.isnan(impact_properties_matrix[:, 3])
-        & (impact_properties_matrix[:, 3] > 0)]
+    if args.map_mode == "deposited":
+        statuses_for_mapping = ["deposited"]
+        mapping_label = "deposited particles"
+    else:
+        statuses_for_mapping = ["deposited", "escaped"]
+        mapping_label = "deposited + escaped particles"
+
+    print("Statuses included in raster maps: "
+          + ", ".join(statuses_for_mapping))
+
+    filtered_impact_data = df_impacts[
+        df_impacts['status'].isin(statuses_for_mapping)
+        & df_impacts['x_last_seen [m]'].notna()
+        & df_impacts['y_last_seen [m]'].notna()
+    ]
 
     if filtered_impact_data.shape[0] == 0:
-        print("No particles impacted according to criteria. "
-              "Cannot generate raster maps.")
+        print(f"No {mapping_label} available for raster maps.")
     else:
-        # (la logica per x_impact_coords, y_impact_coords, diam_impacted
-        # e la definizione della griglia rimane invariata)
-        # (grid definition logic: map_x_ll, map_y_ll, current_map_res, etc.)
-        # (particle binning logic: count_ballistic_class)
-
-        print(f"Number of impacted particles for mapping:"
+        print(f"Number of {mapping_label} for mapping: "
               f"{filtered_impact_data.shape[0]}")
-        x_impact_coords = filtered_impact_data[:, 4]
-        y_impact_coords = filtered_impact_data[:, 5]
-        diam_impacted = filtered_impact_data[:, 1]
+        x_impact_coords = filtered_impact_data['x_last_seen [m]'].to_numpy()
+        y_impact_coords = filtered_impact_data['y_last_seen [m]'].to_numpy()
+        diam_impacted = filtered_impact_data['diameter [m]'].to_numpy()
 
         if grid_definition_mode == "full":
             # ... (codice per la modalità "full") ...
