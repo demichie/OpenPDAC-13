@@ -28,6 +28,12 @@ codeInclude
 
     scalar ringCoeff = 1.1;
 
+    // NOTE: this version introduces a straight intermediate edge in the
+    // original outer Block1/Block3.  Run blockMesh and checkMesh to verify
+    // whether the unchanged corner Block2 remains acceptable for your case;
+    // if blockMesh reports unmatched internal faces, Block2 must also be
+    // split conformally.
+
     const Foam::scalarList& atmCells_aspect_ratio_bottom =
         dict.lookup("atmCells_aspect_ratio_bottom");
     const Foam::scalarList& atmCells_aspect_ratio_top =
@@ -174,9 +180,37 @@ codeInclude
         };
 
         // --------------------------------------------------------------------
-        // SOLVER: Calculates R_icyl and Grading to match cell sizes at the interface
+        // Helper: cell size in the inner part of the split outer edge blocks.
+        // The length is the effective axis-aligned segment from the Icyl axis
+        // point to the corresponding Mid axis point after the Mid axis point
+        // has been aligned with the corner-side Mid points.
         // --------------------------------------------------------------------
-        auto solveRingParameters = [&](scalar R_inner, scalar d_start, label N_ring, scalar L_far_field, label N_outer) -> RingParams 
+        auto axisAlignedBlockInCellSize = [&](scalar R_axis, scalar L_far_field, label N_outer, label N_inner) -> scalar
+        {
+            N_outer = Foam::max(1, N_outer);
+            N_inner = Foam::max(1, N_inner);
+
+            scalar f = scalar(N_inner)/scalar(N_outer);
+            f = Foam::max(0.0, Foam::min(1.0, f));
+
+            scalar r_diag = R_axis*sqrt(0.5);
+            scalar L_in = f*L_far_field + (1.0 - f)*r_diag - R_axis;
+
+            if (L_in <= 1e-12)
+            {
+                scalar L_fallback = Foam::max(1e-12, L_far_field - R_axis);
+                return L_fallback/scalar(N_outer);
+            }
+
+            return L_in/scalar(N_inner);
+        };
+
+        // --------------------------------------------------------------------
+        // SOLVER: Calculates R_icyl and radial grading.  The final cell size
+        // is matched to the actual Icyl->Mid length of Block1In/Block3In,
+        // not to the remaining distance from Icyl to the far boundary.
+        // --------------------------------------------------------------------
+        auto solveRingParameters = [&](scalar R_inner, scalar d_start, label N_ring, scalar L_far_field, label N_outer, label N_inner) -> RingParams 
         {
             // Limits for the geometric expansion ratio 'r'
             // r < 1: compression, r > 1: expansion
@@ -210,7 +244,8 @@ codeInclude
 
                 scalar R_curr = R_inner + ring_width;
                 
-                // 2. Calculate average cell size in the outer block
+                // 2. Calculate target cell size at Icyl from the actual
+                // Icyl->Mid length of the inner split outer block.
                 scalar space_remaining = L_far_field - R_curr;
 
                 // Safety check: if the ring becomes too large and touches the boundary,
@@ -220,7 +255,7 @@ codeInclude
                     continue;
                 }
 
-                scalar d_start_outer = space_remaining / N_outer;
+                scalar d_start_outer = axisAlignedBlockInCellSize(R_curr, L_far_field, N_outer, N_inner);
 
                 // 3. Check Error (Discontinuity at the interface)
                 scalar error = d_end_ring - d_start_outer;
@@ -301,6 +336,34 @@ codeInclude
     int nx_neg_out_mult = nx_neg_out * n_mult;
     int ny_pos_out_mult = ny_pos_out * n_mult;
     int ny_neg_out_mult = ny_neg_out * n_mult;
+
+    // --- Outer edge split control ---
+    // Block1 and Block3 of each outer quadrant are split radially into
+    // In/Out parts.  The requested distance is absolute, but the realized
+    // split is snapped to the closest cell index compatible with all
+    // atmospheric layers, i.e. a multiple of 2^(n_vert_layers-1).
+    scalar outerStraightEdgeDistance = dict.lookupOrDefault<scalar>
+    (
+        "outerStraightEdgeDistance",
+        hor_cell_size_top_atm
+    );
+
+    label nOuterMinFine = Foam::min
+    (
+        Foam::min(nx_pos_out_mult, nx_neg_out_mult),
+        Foam::min(ny_pos_out_mult, ny_neg_out_mult)
+    );
+
+    label nOuterEdgeInnerRaw = label(round(outerStraightEdgeDistance/$hor_cell_size_topo));
+    label nOuterEdgeInnerFine = n_mult * label(round(scalar(nOuterEdgeInnerRaw)/scalar(n_mult)));
+
+    nOuterEdgeInnerFine = Foam::max(n_mult, nOuterEdgeInnerFine);
+    nOuterEdgeInnerFine = Foam::min(nOuterEdgeInnerFine, nOuterMinFine - n_mult);
+    nOuterEdgeInnerFine = Foam::max(n_mult, nOuterEdgeInnerFine);
+
+    Info << "outerStraightEdgeDistance target " << outerStraightEdgeDistance << endl;
+    Info << "nOuterEdgeInnerFine snapped " << nOuterEdgeInnerFine
+         << " using n_mult " << n_mult << endl;
 
     Info << "--- Automatically calculating n_crater (based on "
             "crater_cell_size) ---"
@@ -557,6 +620,8 @@ codeInclude
                              -1); // Intermediate Cylinder (r=cyl_radius)
 
     List<label> L_far_Start($n_vert_layers + 2, -1); // Far field
+    List<label> L_mid_Start($n_vert_layers + 2, -1); // Intermediate straight edges inside outer blocks
+    List<label> L_cornerSplit_Start($n_vert_layers + 2, -1); // Additional points to split outer corner blocks conformally
 
     // Indices of bottom vertices for layers > 1 (vertical duplicates)
     List<label> L_bottom_center_Start($n_vert_layers + 2, -1);
@@ -565,6 +630,8 @@ codeInclude
     List<label> L_bottom_inrDup_Start($n_vert_layers + 2, -1);
     List<label> L_bottom_icyl_Start($n_vert_layers + 2, -1);
     List<label> L_bottom_far_Start($n_vert_layers + 2, -1);
+    List<label> L_bottom_mid_Start($n_vert_layers + 2, -1);
+    List<label> L_bottom_cornerSplit_Start($n_vert_layers + 2, -1);
 
     // --- Conduit Base Vertices (z = conduit_base_z) ---
     if ($h_conduit > 0)
@@ -624,6 +691,31 @@ codeInclude
     // Size is +1 because loop runs from 1 to n_vert_layers.
     List<scalar> storedGradings($n_vert_layers + 1, rad_gr_val);
     List<scalar> storedRadiusCyl($n_vert_layers + 1, $r_crater_top + ring_width_const);
+
+    // Recompute the bottom radial grading target using the actual Icyl->Mid
+    // length of the inner split outer blocks at z=0.  The radius is left as
+    // obtained from the existing bottom-ring calculation; only the target
+    // grading ratio is updated to match Block1In/Block3In.
+    {
+        scalar R0 = storedRadiusCyl[0];
+        scalar dN = axisAlignedBlockInCellSize(R0, mag($atm_y_pos), ny_pos_out_mult, nOuterEdgeInnerFine);
+        scalar dW = axisAlignedBlockInCellSize(R0, mag($atm_x_neg), nx_neg_out_mult, nOuterEdgeInnerFine);
+        scalar dS = axisAlignedBlockInCellSize(R0, mag($atm_y_neg), ny_neg_out_mult, nOuterEdgeInnerFine);
+        scalar dE = axisAlignedBlockInCellSize(R0, mag($atm_x_pos), nx_pos_out_mult, nOuterEdgeInnerFine);
+        scalar dTarget0 = 0.25*(dN + dW + dS + dE);
+
+        scalar dMin0 = Foam::min(Foam::min(dN, dW), Foam::min(dS, dE));
+        scalar dMax0 = Foam::max(Foam::max(dN, dW), Foam::max(dS, dE));
+        if (Foam::mag(dMax0 - dMin0) > 1e-6*Foam::max(1.0, dTarget0))
+        {
+            Info << "Warning: bottom BlockIn target cell sizes are not identical: "
+                 << dN << " " << dW << " " << dS << " " << dE << endl;
+        }
+
+        storedGradings[0] = dTarget0/actual_crater_top_size;
+        Info << "Bottom radial grading retargeted to BlockIn cell size "
+             << dTarget0 << ", grading " << storedGradings[0] << endl;
+    }
 
     // --- External far-field split positions for horizontal layer interfaces ---
     // These control the intermediate points on the outer rectangular boundary
@@ -742,6 +834,121 @@ codeInclude
     Info << "farSplit_xn " << farSplit_xn << endl;
     Info << "farSplit_yp " << farSplit_yp << endl;
     Info << "farSplit_yn " << farSplit_yn << endl;
+
+    // Add the 16 intermediate straight-edge vertices used to split the
+    // original outer Block1 and Block3 into In/Out parts.  Vertices are
+    // placed along the segment from the corresponding Icyl point to the
+    // corresponding Far point.  No arc is assigned to the Mid edges, so these
+    // edges are straight in blockMesh.
+    auto addMidOuterVertices = [&](label& startIdx, label icylStart, label farStart, const string& prefix)
+    {
+        startIdx = vertexCount;
+
+        auto icylIndexForFar = [&](label farOffset) -> label
+        {
+            if (farOffset == 0) return 0;
+            if (farOffset == 1 || farOffset == 2 || farOffset == 3) return 1;
+            if (farOffset == 4) return 2;
+            if (farOffset == 5 || farOffset == 6 || farOffset == 7) return 3;
+            if (farOffset == 8) return 4;
+            if (farOffset == 9 || farOffset == 10 || farOffset == 11) return 5;
+            if (farOffset == 12) return 6;
+            return 7;
+        };
+
+        auto nFineForFar = [&](label farOffset) -> label
+        {
+            if (farOffset == 0 || farOffset == 1 || farOffset == 15) return ny_pos_out_mult;
+            if (farOffset == 3 || farOffset == 4 || farOffset == 5) return nx_neg_out_mult;
+            if (farOffset == 7 || farOffset == 8 || farOffset == 9) return ny_neg_out_mult;
+            if (farOffset == 11 || farOffset == 12 || farOffset == 13) return nx_pos_out_mult;
+
+            // Corner helper vertices are not used by the 20-block split, but
+            // keep a well-defined position for diagnostics/possible extensions.
+            if (farOffset == 2) return Foam::min(nx_neg_out_mult, ny_pos_out_mult);
+            if (farOffset == 6) return Foam::min(nx_neg_out_mult, ny_neg_out_mult);
+            if (farOffset == 10) return Foam::min(nx_pos_out_mult, ny_neg_out_mult);
+            return Foam::min(nx_pos_out_mult, ny_pos_out_mult);
+        };
+
+        List<vector> midPts(16);
+
+        for (label k = 0; k < 16; ++k)
+        {
+            vector p0 = points[icylStart + icylIndexForFar(k)];
+            vector p1 = points[farStart + k];
+            scalar f = scalar(nOuterEdgeInnerFine)/scalar(nFineForFar(k));
+            f = Foam::max(0.0, Foam::min(1.0, f));
+            midPts[k] = p0 + f*(p1 - p0);
+        }
+
+        // Align only the four axis mid-points with the already computed
+        // corner-side mid-points.  The corner-side mid-points stay unchanged;
+        // only Mid 0, 4, 8 and 12 are shifted so that the In/Out interface
+        // is parallel to the Cartesian grid lines used by the corner split.
+        midPts[0].y()  = 0.5*(midPts[1].y()  + midPts[15].y()); // North axis
+        midPts[4].x()  = 0.5*(midPts[3].x()  + midPts[5].x());  // West axis
+        midPts[8].y()  = 0.5*(midPts[7].y()  + midPts[9].y());  // South axis
+        midPts[12].x() = 0.5*(midPts[11].x() + midPts[13].x()); // East axis
+
+        for (label k = 0; k < 16; ++k)
+        {
+            addVertex(midPts[k], prefix + " Mid " + Foam::name(k));
+        }
+    };
+
+
+    auto addCornerOuterVertices = [&](label& cornerStart,
+                                      label icylStart,
+                                      label midStart,
+                                      label farStart,
+                                      const string& prefix)
+    {
+        cornerStart = vertexCount;
+
+        auto nFineForFar = [&](label farOffset) -> label
+        {
+            if (farOffset == 0 || farOffset == 1 || farOffset == 15) return ny_pos_out_mult;
+            if (farOffset == 3 || farOffset == 4 || farOffset == 5) return nx_neg_out_mult;
+            if (farOffset == 7 || farOffset == 8 || farOffset == 9) return ny_neg_out_mult;
+            if (farOffset == 11 || farOffset == 12 || farOffset == 13) return nx_pos_out_mult;
+            if (farOffset == 2) return Foam::min(nx_neg_out_mult, ny_pos_out_mult);
+            if (farOffset == 6) return Foam::min(nx_neg_out_mult, ny_neg_out_mult);
+            if (farOffset == 10) return Foam::min(nx_pos_out_mult, ny_neg_out_mult);
+            return Foam::min(nx_pos_out_mult, ny_pos_out_mult);
+        };
+
+        for (label i = 0; i < 4; ++i)
+        {
+            label icyl_idx_corn = (2*i + 1) % 8;
+            label far_idx_prev1 = (4*i + 1) % 16;
+            label far_idx_corn  = (4*i + 2) % 16;
+            label far_idx_next1 = (4*i + 3) % 16;
+
+            vector A  = points[icylStart + icyl_idx_corn];
+            vector B  = points[farStart + far_idx_prev1];
+            vector C  = points[farStart + far_idx_corn];
+            vector D  = points[farStart + far_idx_next1];
+            vector AB = points[midStart + far_idx_prev1];
+            vector AD = points[midStart + far_idx_next1];
+
+            scalar fx = scalar(nOuterEdgeInnerFine)/scalar(nFineForFar(far_idx_prev1));
+            scalar fy = scalar(nOuterEdgeInnerFine)/scalar(nFineForFar(far_idx_next1));
+            fx = Foam::max(0.0, Foam::min(1.0, fx));
+            fy = Foam::max(0.0, Foam::min(1.0, fy));
+
+            // Points on the two outer sides of the corner block, plus the
+            // interior intersection.  These make the corner conformal with
+            // the In/Out split on both adjacent edge blocks.
+            vector BC = B + fy*(C - B);
+            vector DC = D + fx*(C - D);
+            vector P  = AB + fy*(DC - AB);
+
+            addVertex(BC, prefix + " CornerSplit BC " + Foam::name(i));
+            addVertex(DC, prefix + " CornerSplit DC " + Foam::name(i));
+            addVertex(P,  prefix + " CornerSplit P "  + Foam::name(i));
+        }
+    };
 
     // --- Loop through atmospheric horizontal layers ---
     for (label layer = 1; layer <= $n_vert_layers; ++layer)
@@ -887,6 +1094,16 @@ addVertex(vector($atm_x_pos, $atm_y_pos, z_level),
 addVertex(vector(icylExt_xp, $atm_y_pos, z_level),
           prefix + " Far N1"); // New Idx 15
 
+        addMidOuterVertices(L_bottom_mid_Start[listIdxBottom],
+                            L_bottom_icyl_Start[listIdxBottom],
+                            L_bottom_far_Start[listIdxBottom],
+                            prefix);
+        addCornerOuterVertices(L_bottom_cornerSplit_Start[listIdxBottom],
+                               L_bottom_icyl_Start[listIdxBottom],
+                               L_bottom_mid_Start[listIdxBottom],
+                               L_bottom_far_Start[listIdxBottom],
+                               prefix);
+
         z_level = $atm_top_z * layer_fraction[layer];
 
         r_cr_top = $r_crater_top * pow($exp_fact, layer);
@@ -945,17 +1162,19 @@ addVertex(vector(icylExt_xp, $atm_y_pos, z_level),
         label N_xn = Foam::max(1, (int)round(nx_neg_out_mult / (double)div_factor));
         label N_yp = Foam::max(1, (int)round(ny_pos_out_mult / (double)div_factor));
         label N_yn = Foam::max(1, (int)round(ny_neg_out_mult / (double)div_factor));
+        label N_in_outer = Foam::max(1, (int)round(nOuterEdgeInnerFine / (double)div_factor));
 
-        Info << "N_xp " << N_xp  << " N_yp " << N_yp  << "N_xn " << N_xn  << "N_yn " << N_yn << endl;
+        Info << "N_xp " << N_xp  << " N_yp " << N_yp  << "N_xn " << N_xn  << "N_yn " << N_yn
+             << " N_in_outer " << N_in_outer << endl;
 
         // ------------------------------------------------------------------
         // 3. Solve ring parameters for the 4 cardinal directions (Asymmetry)
         //    (Uses r_cr_top as the inner radius)
         // ------------------------------------------------------------------
-        RingParams p_xp = solveRingParameters(r_cr_top, d_start_curr, n_rad_gr_interface, mag($atm_x_pos), N_xp);
-        RingParams p_xn = solveRingParameters(r_cr_top, d_start_curr, n_rad_gr_interface, mag($atm_x_neg), N_xn);
-        RingParams p_yp = solveRingParameters(r_cr_top, d_start_curr, n_rad_gr_interface, mag($atm_y_pos), N_yp);
-        RingParams p_yn = solveRingParameters(r_cr_top, d_start_curr, n_rad_gr_interface, mag($atm_y_neg), N_yn);
+        RingParams p_xp = solveRingParameters(r_cr_top, d_start_curr, n_rad_gr_interface, mag($atm_x_pos), N_xp, N_in_outer);
+        RingParams p_xn = solveRingParameters(r_cr_top, d_start_curr, n_rad_gr_interface, mag($atm_x_neg), N_xn, N_in_outer);
+        RingParams p_yp = solveRingParameters(r_cr_top, d_start_curr, n_rad_gr_interface, mag($atm_y_pos), N_yp, N_in_outer);
+        RingParams p_yn = solveRingParameters(r_cr_top, d_start_curr, n_rad_gr_interface, mag($atm_y_neg), N_yn, N_in_outer);
 
         // ------------------------------------------------------------------
         // 4. Select the Minimum Radius (Conservative Strategy)
@@ -1036,6 +1255,16 @@ addVertex(vector($atm_x_pos, $atm_y_pos, z_level),
 addVertex(vector(icylExt_xp, $atm_y_pos, z_level),
           prefix + " Far N1"); // New Idx 15
 
+        addMidOuterVertices(L_mid_Start[listIdxTop],
+                            L_icyl_Start[listIdxTop],
+                            L_far_Start[listIdxTop],
+                            prefix);
+        addCornerOuterVertices(L_cornerSplit_Start[listIdxTop],
+                               L_icyl_Start[listIdxTop],
+                               L_mid_Start[listIdxTop],
+                               L_far_Start[listIdxTop],
+                               prefix);
+
     } // End layer loop
 
     os << ");" << endl; // End vertices section
@@ -1049,6 +1278,134 @@ addVertex(vector(icylExt_xp, $atm_y_pos, z_level),
     // Helper to get vertex index (can be defined again locally)
     auto vIdx = [&](label groupStart, int offset) {
         return groupStart + offset;
+    };
+
+    auto writeOuterSplitPatchFaces = [&](label icylStart, label midStart, label cornerStart, label farStart, const string& commentPrefix)
+    {
+        for (int i = 0; i < 4; ++i)
+        {
+            int icyl_idx_prev = (2 * i + 0) % 8;
+            int icyl_idx_corn = (2 * i + 1) % 8;
+            int icyl_idx_next = (2 * i + 2) % 8;
+            int far_idx_prev0 = (4 * i + 0) % 16;
+            int far_idx_prev1 = (4 * i + 1) % 16;
+            int far_idx_corn = (4 * i + 2) % 16;
+            int far_idx_next1 = (4 * i + 3) % 16;
+            int far_idx_next0 = (4 * i + 4) % 16;
+            int cBase = 3*i;
+
+            os << "            (" << vIdx(icylStart, icyl_idx_prev) << " "
+               << vIdx(midStart, far_idx_prev0) << " "
+               << vIdx(midStart, far_idx_prev1) << " "
+               << vIdx(icylStart, icyl_idx_corn) << ") // " << commentPrefix
+               << " Edge " << i << ".1In" << endl;
+
+            os << "            (" << vIdx(midStart, far_idx_prev0) << " "
+               << vIdx(farStart, far_idx_prev0) << " "
+               << vIdx(farStart, far_idx_prev1) << " "
+               << vIdx(midStart, far_idx_prev1) << ") // " << commentPrefix
+               << " Edge " << i << ".1Out" << endl;
+
+            os << "            (" << vIdx(icylStart, icyl_idx_corn) << " "
+               << vIdx(midStart, far_idx_prev1) << " "
+               << vIdx(cornerStart, cBase + 2) << " "
+               << vIdx(midStart, far_idx_next1) << ") // " << commentPrefix
+               << " Corner " << i << ".In" << endl;
+
+            os << "            (" << vIdx(midStart, far_idx_prev1) << " "
+               << vIdx(farStart, far_idx_prev1) << " "
+               << vIdx(cornerStart, cBase + 0) << " "
+               << vIdx(cornerStart, cBase + 2) << ") // " << commentPrefix
+               << " Corner " << i << ".PrevOut" << endl;
+
+            os << "            (" << vIdx(cornerStart, cBase + 2) << " "
+               << vIdx(cornerStart, cBase + 0) << " "
+               << vIdx(farStart, far_idx_corn) << " "
+               << vIdx(cornerStart, cBase + 1) << ") // " << commentPrefix
+               << " Corner " << i << ".FarOut" << endl;
+
+            os << "            (" << vIdx(midStart, far_idx_next1) << " "
+               << vIdx(cornerStart, cBase + 2) << " "
+               << vIdx(cornerStart, cBase + 1) << " "
+               << vIdx(farStart, far_idx_next1) << ") // " << commentPrefix
+               << " Corner " << i << ".NextOut" << endl;
+
+            os << "            (" << vIdx(icylStart, icyl_idx_corn) << " "
+               << vIdx(midStart, far_idx_next1) << " "
+               << vIdx(midStart, far_idx_next0) << " "
+               << vIdx(icylStart, icyl_idx_next) << ") // " << commentPrefix
+               << " Edge " << i << ".2In" << endl;
+
+            os << "            (" << vIdx(midStart, far_idx_next1) << " "
+               << vIdx(farStart, far_idx_next1) << " "
+               << vIdx(farStart, far_idx_next0) << " "
+               << vIdx(midStart, far_idx_next0) << ") // " << commentPrefix
+               << " Edge " << i << ".2Out" << endl;
+        }
+    };
+
+
+    // External far-field vertical boundary faces for the conformally split
+    // outer corner blocks.  The old 16 Far-Far faces are no longer valid
+    // because Far[prev1]-Far[corner] and Far[corner]-Far[next1] are split by
+    // the corner split points.  This helper writes the actual exposed faces.
+    auto writeOuterFarVerticalPatchFaces = [&](label btmFarStart,
+                                               label btmCornerStart,
+                                               label topFarStart,
+                                               label topCornerStart,
+                                               const string& commentPrefix)
+    {
+        auto writeVFace = [&](label b0, label b1, label t0, label t1, const string& comment)
+        {
+            os << "            (" << b0 << " " << b1 << " " << t1 << " " << t0
+               << ") // " << comment << endl;
+        };
+
+        for (int i = 0; i < 4; ++i)
+        {
+            int far_idx_prev0 = (4*i + 0) % 16;
+            int far_idx_prev1 = (4*i + 1) % 16;
+            int far_idx_corn  = (4*i + 2) % 16;
+            int far_idx_next1 = (4*i + 3) % 16;
+            int far_idx_next0 = (4*i + 4) % 16;
+            int cBase = 3*i;
+
+            writeVFace(vIdx(btmFarStart, far_idx_prev0),
+                       vIdx(btmFarStart, far_idx_prev1),
+                       vIdx(topFarStart, far_idx_prev0),
+                       vIdx(topFarStart, far_idx_prev1),
+                       commentPrefix + " Edge " + Foam::name(i) + ".prev");
+
+            writeVFace(vIdx(btmFarStart, far_idx_prev1),
+                       vIdx(btmCornerStart, cBase + 0),
+                       vIdx(topFarStart, far_idx_prev1),
+                       vIdx(topCornerStart, cBase + 0),
+                       commentPrefix + " Corner " + Foam::name(i) + ".prevA");
+
+            writeVFace(vIdx(btmCornerStart, cBase + 0),
+                       vIdx(btmFarStart, far_idx_corn),
+                       vIdx(topCornerStart, cBase + 0),
+                       vIdx(topFarStart, far_idx_corn),
+                       commentPrefix + " Corner " + Foam::name(i) + ".prevB");
+
+            writeVFace(vIdx(btmFarStart, far_idx_corn),
+                       vIdx(btmCornerStart, cBase + 1),
+                       vIdx(topFarStart, far_idx_corn),
+                       vIdx(topCornerStart, cBase + 1),
+                       commentPrefix + " Corner " + Foam::name(i) + ".nextA");
+
+            writeVFace(vIdx(btmCornerStart, cBase + 1),
+                       vIdx(btmFarStart, far_idx_next1),
+                       vIdx(topCornerStart, cBase + 1),
+                       vIdx(topFarStart, far_idx_next1),
+                       commentPrefix + " Corner " + Foam::name(i) + ".nextB");
+
+            writeVFace(vIdx(btmFarStart, far_idx_next1),
+                       vIdx(btmFarStart, far_idx_next0),
+                       vIdx(topFarStart, far_idx_next1),
+                       vIdx(topFarStart, far_idx_next0),
+                       commentPrefix + " Edge " + Foam::name(i) + ".next");
+        }
     };
 
 
@@ -1245,6 +1602,8 @@ addVertex(vector(icylExt_xp, $atm_y_pos, z_level),
             L_bottom_inrDup_Start[layer]; // Not used for these blocks
         label L_btm_icyl = L_bottom_icyl_Start[layer];
         label L_btm_far = L_bottom_far_Start[layer];
+        label L_btm_mid = L_bottom_mid_Start[layer];
+        label L_btm_corner = L_bottom_cornerSplit_Start[layer];
 
         label L_top_center = L_center_Start[layer];
         label L_top_oct = L_oct_Start[layer];
@@ -1252,6 +1611,8 @@ addVertex(vector(icylExt_xp, $atm_y_pos, z_level),
         label L_top_inrDup = L_inrDup_Start[layer]; // Not used for these blocks
         label L_top_icyl = L_icyl_Start[layer];
         label L_top_far = L_far_Start[layer];
+        label L_top_mid = L_mid_Start[layer];
+        label L_top_corner = L_cornerSplit_Start[layer];
 
         if (nz_layer > 0)
         { // Only define blocks if layer has non-zero cells vertically
@@ -1420,63 +1781,129 @@ addVertex(vector(icylExt_xp, $atm_y_pos, z_level),
                     n2_cor = current_nx_p; // Block 2 (NE corner): nx+, ny+
                 }
 
-                // --- Define the 3 Blocks for this Quadrant ---
+                // --- Define the 5 Blocks for this Quadrant ---
+                // Block1 and Block3 are split radially into In/Out parts by
+                // the intermediate straight edge.  Block2 is left unchanged.
+                label nIn = Foam::max(1, nOuterEdgeInnerFine / j);
+                label n2_out = Foam::max(1, n2_cor - nIn);
+                label n1_out = Foam::max(1, n1_cor - nIn);
 
-                // Block 1: Previous Edge (e.g., N-NW edge for i=0)
+                // Block 1In: Previous Edge, inner curved-to-straight part
                 os << "    hex ("
-                   // Base Face (CCW): Icyl[prev], Far[prev0], Far[prev1],
-                   // Icyl[corner]
-                   << vIdx(L_btm_icyl, icyl_idx_prev) << " " // v0
-                   << vIdx(L_btm_far, far_idx_prev0) << " " // v1
-                   << vIdx(L_btm_far, far_idx_prev1) << " " // v2
-                   << vIdx(L_btm_icyl, icyl_idx_corn)
-                   << " " // v3
-                   // Top Face: Corresponding vertices
-                   << vIdx(L_top_icyl, icyl_idx_prev) << " " // v4
-                   << vIdx(L_top_far, far_idx_prev0) << " " // v5
-                   << vIdx(L_top_far, far_idx_prev1) << " " // v6
-                   << vIdx(L_top_icyl, icyl_idx_corn) << ") " // v7
-                   << "( " << n2_cor << " " << n_crater << " " << nz_layer
+                   << vIdx(L_btm_icyl, icyl_idx_prev) << " "
+                   << vIdx(L_btm_mid, far_idx_prev0) << " "
+                   << vIdx(L_btm_mid, far_idx_prev1) << " "
+                   << vIdx(L_btm_icyl, icyl_idx_corn) << " "
+                   << vIdx(L_top_icyl, icyl_idx_prev) << " "
+                   << vIdx(L_top_mid, far_idx_prev0) << " "
+                   << vIdx(L_top_mid, far_idx_prev1) << " "
+                   << vIdx(L_top_icyl, icyl_idx_corn) << ") "
+                   << "( " << nIn << " " << n_crater << " " << nz_layer
                    << ") simpleGrading (1 1 " << grading_layer << ") // L"
-                   << layer << " Outer Edge " << i << ".1" << endl;
+                   << layer << " Outer Edge " << i << ".1In" << endl;
 
-                // Block 2: Corner (e.g., NW corner for i=0)
+                // Block 1Out: Previous Edge, outer straight-to-far part
                 os << "    hex ("
-                   // Base Face (CCW): Icyl[corner], Far[prev1], Far[corner],
-                   // Far[next1]
-                   << vIdx(L_btm_icyl, icyl_idx_corn) << " " // v0
-                   << vIdx(L_btm_far, far_idx_prev1) << " " // v1
-                   << vIdx(L_btm_far, far_idx_corn) << " " // v2
-                   << vIdx(L_btm_far, far_idx_next1)
-                   << " " // v3
-                   // Top Face: Corresponding vertices
-                   << vIdx(L_top_icyl, icyl_idx_corn) << " " // v4
-                   << vIdx(L_top_far, far_idx_prev1) << " " // v5
-                   << vIdx(L_top_far, far_idx_corn) << " " // v6
-                   << vIdx(L_top_far, far_idx_next1)
-                   << ") " // v7
-                   // Cell Counts: nx, ny based on quadrant
-                   << "( " << n2_cor << " " << n1_cor << " " << nz_layer
+                   << vIdx(L_btm_mid, far_idx_prev0) << " "
+                   << vIdx(L_btm_far, far_idx_prev0) << " "
+                   << vIdx(L_btm_far, far_idx_prev1) << " "
+                   << vIdx(L_btm_mid, far_idx_prev1) << " "
+                   << vIdx(L_top_mid, far_idx_prev0) << " "
+                   << vIdx(L_top_far, far_idx_prev0) << " "
+                   << vIdx(L_top_far, far_idx_prev1) << " "
+                   << vIdx(L_top_mid, far_idx_prev1) << ") "
+                   << "( " << n2_out << " " << n_crater << " " << nz_layer
                    << ") simpleGrading (1 1 " << grading_layer << ") // L"
-                   << layer << " Outer Corner " << i << endl;
+                   << layer << " Outer Edge " << i << ".1Out" << endl;
 
-                // Block 3: Next Edge (e.g., NW-W edge for i=0)
+                // Block 2 corner is split into four conformal sub-blocks.
+                // This avoids a one-face-to-two-faces mismatch against the
+                // adjacent Block1In/Out and Block3In/Out splits.
+                int cBase = 3*i;
+
+                // Block 2In: inner corner next to Icyl
                 os << "    hex ("
-                   // Base Face (CCW): Icyl[corner], Far[next1], Far[next0],
-                   // Icyl[next]
-                   << vIdx(L_btm_icyl, icyl_idx_corn) << " " // v0
-                   << vIdx(L_btm_far, far_idx_next1) << " " // v1
-                   << vIdx(L_btm_far, far_idx_next0) << " " // v2
-                   << vIdx(L_btm_icyl, icyl_idx_next)
-                   << " " // v3
-                   // Top Face: Corresponding vertices
-                   << vIdx(L_top_icyl, icyl_idx_corn) << " " // v4
-                   << vIdx(L_top_far, far_idx_next1) << " " // v5
-                   << vIdx(L_top_far, far_idx_next0) << " " // v6
-                   << vIdx(L_top_icyl, icyl_idx_next) << ") " // v7
-                   << "( " << n1_cor << " " << n_crater << " " << nz_layer
+                   << vIdx(L_btm_icyl, icyl_idx_corn) << " "
+                   << vIdx(L_btm_mid, far_idx_prev1) << " "
+                   << vIdx(L_btm_corner, cBase + 2) << " "
+                   << vIdx(L_btm_mid, far_idx_next1) << " "
+                   << vIdx(L_top_icyl, icyl_idx_corn) << " "
+                   << vIdx(L_top_mid, far_idx_prev1) << " "
+                   << vIdx(L_top_corner, cBase + 2) << " "
+                   << vIdx(L_top_mid, far_idx_next1) << ") "
+                   << "( " << nIn << " " << nIn << " " << nz_layer
                    << ") simpleGrading (1 1 " << grading_layer << ") // L"
-                   << layer << " Outer Edge " << i << ".2" << endl;
+                   << layer << " Outer Corner " << i << ".In" << endl;
+
+                // Block 2PrevOut: outer part adjacent to Block1Out
+                os << "    hex ("
+                   << vIdx(L_btm_mid, far_idx_prev1) << " "
+                   << vIdx(L_btm_far, far_idx_prev1) << " "
+                   << vIdx(L_btm_corner, cBase + 0) << " "
+                   << vIdx(L_btm_corner, cBase + 2) << " "
+                   << vIdx(L_top_mid, far_idx_prev1) << " "
+                   << vIdx(L_top_far, far_idx_prev1) << " "
+                   << vIdx(L_top_corner, cBase + 0) << " "
+                   << vIdx(L_top_corner, cBase + 2) << ") "
+                   << "( " << n2_out << " " << nIn << " " << nz_layer
+                   << ") simpleGrading (1 1 " << grading_layer << ") // L"
+                   << layer << " Outer Corner " << i << ".PrevOut" << endl;
+
+                // Block 2FarOut: far corner part
+                os << "    hex ("
+                   << vIdx(L_btm_corner, cBase + 2) << " "
+                   << vIdx(L_btm_corner, cBase + 0) << " "
+                   << vIdx(L_btm_far, far_idx_corn) << " "
+                   << vIdx(L_btm_corner, cBase + 1) << " "
+                   << vIdx(L_top_corner, cBase + 2) << " "
+                   << vIdx(L_top_corner, cBase + 0) << " "
+                   << vIdx(L_top_far, far_idx_corn) << " "
+                   << vIdx(L_top_corner, cBase + 1) << ") "
+                   << "( " << n2_out << " " << n1_out << " " << nz_layer
+                   << ") simpleGrading (1 1 " << grading_layer << ") // L"
+                   << layer << " Outer Corner " << i << ".FarOut" << endl;
+
+                // Block 2NextOut: outer part adjacent to Block3Out
+                os << "    hex ("
+                   << vIdx(L_btm_mid, far_idx_next1) << " "
+                   << vIdx(L_btm_corner, cBase + 2) << " "
+                   << vIdx(L_btm_corner, cBase + 1) << " "
+                   << vIdx(L_btm_far, far_idx_next1) << " "
+                   << vIdx(L_top_mid, far_idx_next1) << " "
+                   << vIdx(L_top_corner, cBase + 2) << " "
+                   << vIdx(L_top_corner, cBase + 1) << " "
+                   << vIdx(L_top_far, far_idx_next1) << ") "
+                   << "( " << nIn << " " << n1_out << " " << nz_layer
+                   << ") simpleGrading (1 1 " << grading_layer << ") // L"
+                   << layer << " Outer Corner " << i << ".NextOut" << endl;
+
+                // Block 3In: Next Edge, inner curved-to-straight part
+                os << "    hex ("
+                   << vIdx(L_btm_icyl, icyl_idx_corn) << " "
+                   << vIdx(L_btm_mid, far_idx_next1) << " "
+                   << vIdx(L_btm_mid, far_idx_next0) << " "
+                   << vIdx(L_btm_icyl, icyl_idx_next) << " "
+                   << vIdx(L_top_icyl, icyl_idx_corn) << " "
+                   << vIdx(L_top_mid, far_idx_next1) << " "
+                   << vIdx(L_top_mid, far_idx_next0) << " "
+                   << vIdx(L_top_icyl, icyl_idx_next) << ") "
+                   << "( " << nIn << " " << n_crater << " " << nz_layer
+                   << ") simpleGrading (1 1 " << grading_layer << ") // L"
+                   << layer << " Outer Edge " << i << ".2In" << endl;
+
+                // Block 3Out: Next Edge, outer straight-to-far part
+                os << "    hex ("
+                   << vIdx(L_btm_mid, far_idx_next1) << " "
+                   << vIdx(L_btm_far, far_idx_next1) << " "
+                   << vIdx(L_btm_far, far_idx_next0) << " "
+                   << vIdx(L_btm_mid, far_idx_next0) << " "
+                   << vIdx(L_top_mid, far_idx_next1) << " "
+                   << vIdx(L_top_far, far_idx_next1) << " "
+                   << vIdx(L_top_far, far_idx_next0) << " "
+                   << vIdx(L_top_mid, far_idx_next0) << ") "
+                   << "( " << n1_out << " " << n_crater << " " << nz_layer
+                   << ") simpleGrading (1 1 " << grading_layer << ") // L"
+                   << layer << " Outer Edge " << i << ".2Out" << endl;
 
             } // End quadrant loop i
 
@@ -1761,9 +2188,11 @@ addVertex(vector(icylExt_xp, $atm_y_pos, z_level),
     label L1_btm_icyl =
         L_bottom_icyl_Start[1]; // Intermediate Cylinder @ bottom L1
     label L1_btm_far = L_bottom_far_Start[1]; // Far Field @ bottom L1
+    label L1_btm_mid = L_bottom_mid_Start[1]; // Intermediate straight edge @ bottom L1
+    label L1_btm_corner = L_bottom_cornerSplit_Start[1]; // Conformal split points inside outer corner blocks
 
     // Check if indices are valid (were generated)
-    if (L1_btm_inrDup < 0 || L1_btm_icyl < 0 || L1_btm_far < 0)
+    if (L1_btm_inrDup < 0 || L1_btm_icyl < 0 || L1_btm_far < 0 || L1_btm_mid < 0 || L1_btm_corner < 0)
     {
         Info << "Error generating terrain_out: Vertex indices for bottom of "
                 "Layer 1 not found."
@@ -1785,45 +2214,9 @@ addVertex(vector(icylExt_xp, $atm_y_pos, z_level),
                << ") // L1 Interface Base " << i << endl;
         }
 
-        // --- Base faces of Layer 1 Outer blocks (Icyl -> Far) ---
+        // --- Base faces of Layer 1 Outer blocks (Icyl -> Mid -> Far) ---
         os << "            // L1 Outer Blocks Base Faces" << endl;
-        for (int i = 0; i < 4;
-             ++i) // Loop through 4 quadrants (i=0:N, i=1:W, i=2:S, i=3:E)
-        {
-            // Calculate Indices (with Modulo for wrap-around)
-            int icyl_idx_prev = (2 * i + 0) % 8;
-            int icyl_idx_corn = (2 * i + 1) % 8;
-            int icyl_idx_next = (2 * i + 2) % 8;
-            int far_idx_prev0 = (4 * i + 0) % 16;
-            int far_idx_prev1 = (4 * i + 1) % 16;
-            int far_idx_corn = (4 * i + 2) % 16;
-            int far_idx_next1 = (4 * i + 3) % 16;
-            int far_idx_next0 = (4 * i + 4) % 16;
-
-            // Base Face Block 1 (Previous Edge) CCW: Icyl[prev], Far[prev0],
-            // Far[prev1], Icyl[corner]
-            os << "            (" << vIdx(L1_btm_icyl, icyl_idx_prev) << " "
-               << vIdx(L1_btm_far, far_idx_prev0) << " "
-               << vIdx(L1_btm_far, far_idx_prev1) << " "
-               << vIdx(L1_btm_icyl, icyl_idx_corn) << ") // L1 Outer Base Edge "
-               << i << ".1" << endl;
-
-            // Base Face Block 2 (Corner) CCW: Icyl[corner], Far[prev1],
-            // Far[corner], Far[next1]
-            os << "            (" << vIdx(L1_btm_icyl, icyl_idx_corn) << " "
-               << vIdx(L1_btm_far, far_idx_prev1) << " "
-               << vIdx(L1_btm_far, far_idx_corn) << " "
-               << vIdx(L1_btm_far, far_idx_next1)
-               << ") // L1 Outer Base Corner " << i << endl;
-
-            // Base Face Block 3 (Next Edge) CCW: Icyl[corner], Far[next1],
-            // Far[next0], Icyl[next]
-            os << "            (" << vIdx(L1_btm_icyl, icyl_idx_corn) << " "
-               << vIdx(L1_btm_far, far_idx_next1) << " "
-               << vIdx(L1_btm_far, far_idx_next0) << " "
-               << vIdx(L1_btm_icyl, icyl_idx_next) << ") // L1 Outer Base Edge "
-               << i << ".2" << endl;
-        }
+        writeOuterSplitPatchFaces(L1_btm_icyl, L1_btm_mid, L1_btm_corner, L1_btm_far, "L1 Outer Base");
     } // End else (indices valid)
 
     os << "        );" << endl;
@@ -1860,23 +2253,21 @@ addVertex(vector(icylExt_xp, $atm_y_pos, z_level),
             continue; // Skip to next layer if indices are bad
         }
 
-        // Inner loop: Iterate through the 16 far-field boundary segments
-        for (int i = 0; i < 16; ++i)
+        label btmCornerStart = L_bottom_cornerSplit_Start[layer];
+        label topCornerStart = L_cornerSplit_Start[layer];
+
+        if (btmCornerStart < 0 || topCornerStart < 0)
         {
-            int i_plus_1 =
-                (i + 1) % 16; // Index of the next vertex (wraps around)
-
-            // Define the vertical face connecting the bottom edge to the top
-            // edge Order: (BottomLeft, BottomRight, TopRight, TopLeft) for
-            // outward normal
-            label v0 = vIdx(btmFarStart, i);
-            label v1 = vIdx(btmFarStart, i_plus_1);
-            label v2 = vIdx(topFarStart, i_plus_1);
-            label v3 = vIdx(topFarStart, i);
-
-            os << "            (" << v0 << " " << v1 << " " << v2 << " " << v3
-               << ") // L" << layer << " Atm Face " << i << endl;
+            Info << "Error generating atm patch: corner split vertex indices for layer "
+                 << layer << " not found." << endl;
+            continue;
         }
+
+        writeOuterFarVerticalPatchFaces(btmFarStart,
+                                        btmCornerStart,
+                                        topFarStart,
+                                        topCornerStart,
+                                        "L" + Foam::name(layer) + " Atm");
     } // End layer loop
 
     os << "        );" << endl;
@@ -1901,9 +2292,11 @@ addVertex(vector(icylExt_xp, $atm_y_pos, z_level),
         L_inrDup_Start[N]; // Not needed, same as topInr at this level
     label topIcyl = L_icyl_Start[N];
     label topFar = L_far_Start[N];
+    label topMid = L_mid_Start[N];
+    label topCorner = L_cornerSplit_Start[N];
 
     // Check if indices are valid
-    if (topCenter < 0 || topOct < 0 || topInr < 0 || topIcyl < 0 || topFar < 0)
+    if (topCenter < 0 || topOct < 0 || topInr < 0 || topIcyl < 0 || topFar < 0 || topMid < 0 || topCorner < 0)
     {
         Info << "Error generating top patch: Vertex indices for top layer ("
              << N << ") not found." << endl;
@@ -1953,44 +2346,8 @@ addVertex(vector(icylExt_xp, $atm_y_pos, z_level),
         }
 
         // --- Top Faces of Outer Blocks (Layer N) ---
-        os << "            // Top Faces: Outer Blocks (Icyl->Far)" << endl;
-        for (int i = 0; i < 4;
-             ++i) // Loop through 4 quadrants (i=0:N, i=1:W, i=2:S, i=3:E)
-        {
-            // Calculate Indices (with Modulo for wrap-around)
-            int icyl_idx_prev = (2 * i + 0) % 8;
-            int icyl_idx_corn = (2 * i + 1) % 8;
-            int icyl_idx_next = (2 * i + 2) % 8;
-            int far_idx_prev0 = (4 * i + 0) % 16;
-            int far_idx_prev1 = (4 * i + 1) % 16;
-            int far_idx_corn = (4 * i + 2) % 16;
-            int far_idx_next1 = (4 * i + 3) % 16;
-            int far_idx_next0 = (4 * i + 4) % 16;
-
-            // Top Face Block 1 (Previous Edge) CCW: Icyl[prev], Far[prev0],
-            // Far[prev1], Icyl[corner]
-            os << "            (" << vIdx(topIcyl, icyl_idx_prev) << " "
-               << vIdx(topFar, far_idx_prev0) << " "
-               << vIdx(topFar, far_idx_prev1) << " "
-               << vIdx(topIcyl, icyl_idx_corn) << ") // Top Outer Edge " << i
-               << ".1" << endl;
-
-            // Top Face Block 2 (Corner) CCW: Icyl[corner], Far[prev1],
-            // Far[corner], Far[next1]
-            os << "            (" << vIdx(topIcyl, icyl_idx_corn) << " "
-               << vIdx(topFar, far_idx_prev1) << " "
-               << vIdx(topFar, far_idx_corn) << " "
-               << vIdx(topFar, far_idx_next1) << ") // Top Outer Corner " << i
-               << endl;
-
-            // Top Face Block 3 (Next Edge) CCW: Icyl[corner], Far[next1],
-            // Far[next0], Icyl[next]
-            os << "            (" << vIdx(topIcyl, icyl_idx_corn) << " "
-               << vIdx(topFar, far_idx_next1) << " "
-               << vIdx(topFar, far_idx_next0) << " "
-               << vIdx(topIcyl, icyl_idx_next) << ") // Top Outer Edge " << i
-               << ".2" << endl;
-        }
+        os << "            // Top Faces: Outer Blocks (Icyl->Mid->Far)" << endl;
+        writeOuterSplitPatchFaces(topIcyl, topMid, topCorner, topFar, "Top Outer");
 
     } // End else (indices valid)
 
@@ -2020,43 +2377,17 @@ addVertex(vector(icylExt_xp, $atm_y_pos, z_level),
 
         label topIcyl = L_icyl_Start[L];
         label topFar = L_far_Start[L];
+        label topMid = L_mid_Start[L];
+        label topCorner = L_cornerSplit_Start[L];
 
-        if (topIcyl < 0 || topFar < 0)
+        if (topIcyl < 0 || topFar < 0 || topMid < 0 || topCorner < 0)
         {
             Info << "Error generating top_outer_layer" << L
                  << ": Vertex indices not found." << endl;
         }
         else
         {
-            for (int i = 0; i < 4; ++i)
-            {
-                int icyl_idx_prev = (2 * i + 0) % 8;
-                int icyl_idx_corn = (2 * i + 1) % 8;
-                int icyl_idx_next = (2 * i + 2) % 8;
-                int far_idx_prev0 = (4 * i + 0) % 16;
-                int far_idx_prev1 = (4 * i + 1) % 16;
-                int far_idx_corn = (4 * i + 2) % 16;
-                int far_idx_next1 = (4 * i + 3) % 16;
-                int far_idx_next0 = (4 * i + 4) % 16;
-
-                os << "            (" << vIdx(topIcyl, icyl_idx_prev) << " "
-                   << vIdx(topFar, far_idx_prev0) << " "
-                   << vIdx(topFar, far_idx_prev1) << " "
-                   << vIdx(topIcyl, icyl_idx_corn) << ") // Top Outer L" << L
-                   << " Edge " << i << ".1" << endl;
-
-                os << "            (" << vIdx(topIcyl, icyl_idx_corn) << " "
-                   << vIdx(topFar, far_idx_prev1) << " "
-                   << vIdx(topFar, far_idx_corn) << " "
-                   << vIdx(topFar, far_idx_next1) << ") // Top Outer L" << L
-                   << " Corner " << i << endl;
-
-                os << "            (" << vIdx(topIcyl, icyl_idx_corn) << " "
-                   << vIdx(topFar, far_idx_next1) << " "
-                   << vIdx(topFar, far_idx_next0) << " "
-                   << vIdx(topIcyl, icyl_idx_next) << ") // Top Outer L" << L
-                   << " Edge " << i << ".2" << endl;
-            }
+            writeOuterSplitPatchFaces(topIcyl, topMid, topCorner, topFar, "Top Outer L" + Foam::name(L));
         }
 
         os << "        );" << endl;
@@ -2072,43 +2403,17 @@ addVertex(vector(icylExt_xp, $atm_y_pos, z_level),
 
         label btmIcyl = L_bottom_icyl_Start[Lp1];
         label btmFar = L_bottom_far_Start[Lp1];
+        label btmMid = L_bottom_mid_Start[Lp1];
+        label btmCorner = L_bottom_cornerSplit_Start[Lp1];
 
-        if (btmIcyl < 0 || btmFar < 0)
+        if (btmIcyl < 0 || btmFar < 0 || btmMid < 0 || btmCorner < 0)
         {
             Info << "Error generating bottom_outer_layer" << Lp1
                  << ": Vertex indices not found." << endl;
         }
         else
         {
-            for (int i = 0; i < 4; ++i)
-            {
-                int icyl_idx_prev = (2 * i + 0) % 8;
-                int icyl_idx_corn = (2 * i + 1) % 8;
-                int icyl_idx_next = (2 * i + 2) % 8;
-                int far_idx_prev0 = (4 * i + 0) % 16;
-                int far_idx_prev1 = (4 * i + 1) % 16;
-                int far_idx_corn = (4 * i + 2) % 16;
-                int far_idx_next1 = (4 * i + 3) % 16;
-                int far_idx_next0 = (4 * i + 4) % 16;
-
-                os << "            (" << vIdx(btmIcyl, icyl_idx_prev) << " "
-                   << vIdx(btmFar, far_idx_prev0) << " "
-                   << vIdx(btmFar, far_idx_prev1) << " "
-                   << vIdx(btmIcyl, icyl_idx_corn) << ") // Bottom Outer L"
-                   << Lp1 << " Edge " << i << ".1" << endl;
-
-                os << "            (" << vIdx(btmIcyl, icyl_idx_corn) << " "
-                   << vIdx(btmFar, far_idx_prev1) << " "
-                   << vIdx(btmFar, far_idx_corn) << " "
-                   << vIdx(btmFar, far_idx_next1) << ") // Bottom Outer L"
-                   << Lp1 << " Corner " << i << endl;
-
-                os << "            (" << vIdx(btmIcyl, icyl_idx_corn) << " "
-                   << vIdx(btmFar, far_idx_next1) << " "
-                   << vIdx(btmFar, far_idx_next0) << " "
-                   << vIdx(btmIcyl, icyl_idx_next) << ") // Bottom Outer L"
-                   << Lp1 << " Edge " << i << ".2" << endl;
-            }
+            writeOuterSplitPatchFaces(btmIcyl, btmMid, btmCorner, btmFar, "Bottom Outer L" + Foam::name(Lp1));
         }
 
         os << "        );" << endl;

@@ -42,6 +42,10 @@ atmCells_aspect_ratio_bottom List<scalar> (1.5 1.0 1.0 1.0);
 // vertical to horizontal aspect ratio of cells at the top of each layer
 atmCells_aspect_ratio_top   List<scalar> (2.0 2.0 2.0 1.0);
 
+// Desired Icyl-to-Mid transition distance; internally quantized to a cell index compatible with all atmospheric layers.
+outerStraightEdgeDistance 350;
+
+
 // 1 = uniform split for outer edges at top of inner layers
 // 2 = uniform split for outer edges at bottom of inner layers
 // 3 = weighted averege of the previous two options 
