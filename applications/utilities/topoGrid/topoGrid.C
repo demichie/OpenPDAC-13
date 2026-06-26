@@ -269,7 +269,6 @@ tmp<pointField> getCentroidalTargetPoints(const fvMesh& mesh)
 }
 
 
-
 // =========================================================================
 // Lightweight mesh-quality metrics used by the optional quality-aware
 // Laplacian smoother.  These checks are intentionally local/simple and are
@@ -379,7 +378,7 @@ scalar minFaceTetQualitySimple(const fvMesh& mesh)
                 continue;
             }
 
-            const vector triNormal = 0.5*((p0 - fC) ^ (p1 - fC));
+            const vector triNormal = 0.5 * ((p0 - fC) ^ (p1 - fC));
             const scalar triArea = mag(triNormal);
 
             if (triArea <= VSMALL)
@@ -389,18 +388,20 @@ scalar minFaceTetQualitySimple(const fvMesh& mesh)
             }
 
             const label ownI = owner[faceI];
-            const scalar ownHeight = mag((fC - cellCentres[ownI]) & (triNormal/triArea));
-            const scalar ownVol = triArea*ownHeight/3.0;
+            const scalar ownHeight =
+                mag((fC - cellCentres[ownI]) & (triNormal / triArea));
+            const scalar ownVol = triArea * ownHeight / 3.0;
             const scalar ownScale = max(pow(edgeLen, 3), VSMALL);
-            localMinQuality = min(localMinQuality, ownVol/ownScale);
+            localMinQuality = min(localMinQuality, ownVol / ownScale);
 
             if (faceI < mesh.nInternalFaces())
             {
                 const label neiI = neighbour[faceI];
-                const scalar neiHeight = mag((fC - cellCentres[neiI]) & (triNormal/triArea));
-                const scalar neiVol = triArea*neiHeight/3.0;
+                const scalar neiHeight =
+                    mag((fC - cellCentres[neiI]) & (triNormal / triArea));
+                const scalar neiVol = triArea * neiHeight / 3.0;
                 const scalar neiScale = max(pow(edgeLen, 3), VSMALL);
-                localMinQuality = min(localMinQuality, neiVol/neiScale);
+                localMinQuality = min(localMinQuality, neiVol / neiScale);
             }
         }
     }
@@ -1232,9 +1233,8 @@ int main(int argc, char* argv[])
 
         if (flattenBottom && flattenBottomExp <= SMALL)
         {
-            FatalErrorInFunction
-                << "flattenBottomExp must be greater than zero"
-                << exit(FatalError);
+            FatalErrorInFunction << "flattenBottomExp must be greater than zero"
+                                 << exit(FatalError);
         }
 
         scalar dzFlat = 0.0;
@@ -1383,8 +1383,8 @@ int main(int argc, char* argv[])
             const label colIndex = static_cast<label>(floor(x_grid));
             const label rowIndex = static_cast<label>(floor(y_grid));
 
-            if (colIndex >= 0 && colIndex < ncols - 1
-                && rowIndex >= 0 && rowIndex < nrows - 1)
+            if (colIndex >= 0 && colIndex < ncols - 1 && rowIndex >= 0
+                && rowIndex < nrows - 1)
             {
                 const scalar xLerp = x_grid - colIndex;
                 const scalar yLerp = y_grid - rowIndex;
@@ -1394,18 +1394,16 @@ int main(int argc, char* argv[])
                 const scalar v10 = elevation(rowIndex + 1, colIndex);
                 const scalar v11 = elevation(rowIndex + 1, colIndex + 1);
 
-                dzFlat =
-                    v00 * (1 - xLerp) * (1 - yLerp)
-                  + v01 * xLerp * (1 - yLerp)
-                  + v10 * (1 - xLerp) * yLerp
-                  + v11 * xLerp * yLerp;
+                dzFlat = v00 * (1 - xLerp) * (1 - yLerp)
+                       + v01 * xLerp * (1 - yLerp) + v10 * (1 - xLerp) * yLerp
+                       + v11 * xLerp * yLerp;
 
                 Info << "flattenBottom enabled" << endl;
                 Info << "flattenBottomX = " << flattenBottomX << endl;
                 Info << "flattenBottomY = " << flattenBottomY << endl;
                 Info << "flattenBottomExp = " << flattenBottomExp << endl;
-                Info << "Deep flat vertical displacement dzFlat = "
-                     << dzFlat << endl;
+                Info << "Deep flat vertical displacement dzFlat = " << dzFlat
+                     << endl;
             }
             else
             {
@@ -1413,8 +1411,7 @@ int main(int argc, char* argv[])
                     << "flattenBottom point (" << flattenBottomX << ", "
                     << flattenBottomY << ") out of DEM bounds "
                     << "x_grid: " << x_grid << ", y_grid: " << y_grid
-                    << ", colIndex: " << colIndex
-                    << ", rowIndex: " << rowIndex
+                    << ", colIndex: " << colIndex << ", rowIndex: " << rowIndex
                     << ", ncols: " << ncols << ", nrows: " << nrows
                     << exit(FatalError);
             }
@@ -1506,8 +1503,8 @@ int main(int argc, char* argv[])
             zFlatten = min(zFlatten, points[pointi].z());
         }
         reduce(zFlatten, minOp<scalar>());
-        Info << "zFlatten = global minimum original mesh point z = "
-             << zFlatten << endl;
+        Info << "zFlatten = global minimum original mesh point z = " << zFlatten
+             << endl;
 
         if (flattenBottom && zFlatten >= -SMALL)
         {
@@ -2106,14 +2103,14 @@ int main(int argc, char* argv[])
                     // For points on or below the topography consider only (x,y)
                     pEval_2D.z() = 0.0;
 
-                    result =
-                        inverseDistanceInterpolationDzBottom(pEval_2D,
-                                                             globalPointsX,
-                                                             globalPointsY,
-                                                             globalDz,
-                                                             globalAreas,
-                                                             interpRelRadius,
-                                                             distThr);
+                    result = inverseDistanceInterpolationDzBottom(
+                        pEval_2D,
+                        globalBottomCentresX_agg,
+                        globalBottomCentresY_agg,
+                        globalBottomCentresDz_agg,
+                        globalBottomCentresAreas_agg,
+                        interpRelRadius,
+                        distThr);
                     scalar dzLocal = result.first();
 
                     if (flattenBottom && pEval.z() < 0.0)
@@ -2124,9 +2121,8 @@ int main(int argc, char* argv[])
                         const scalar flattenWeight =
                             Foam::pow(1.0 - s, flattenBottomExp);
 
-                        interpDz =
-                            flattenWeight * dzLocal
-                          + (1.0 - flattenWeight) * dzFlat;
+                        interpDz = flattenWeight * dzLocal
+                                 + (1.0 - flattenWeight) * dzFlat;
                     }
                     else
                     {
@@ -2304,8 +2300,8 @@ int main(int argc, char* argv[])
         const scalar blendingFactor =
             topoDict.lookupOrDefault<scalar>("internalBlending", 0.2);
         const Switch normalAwareNearGroundSmoothing =
-            topoDict.lookupOrDefault<Switch>(
-                "normalAwareNearGroundSmoothing", false);
+            topoDict.lookupOrDefault<Switch>("normalAwareNearGroundSmoothing",
+                                             false);
         const label normalAwareLayers =
             topoDict.lookupOrDefault<label>("normalAwareLayers", 2);
         const scalar normalAwareNormalRelax =
@@ -2316,7 +2312,8 @@ int main(int argc, char* argv[])
         const Switch rejectLaplacianOnConcave =
             topoDict.lookupOrDefault<Switch>("rejectLaplacianOnConcave", true);
         const Switch rejectLaplacianOnLowTetQuality =
-            topoDict.lookupOrDefault<Switch>("rejectLaplacianOnLowTetQuality", true);
+            topoDict.lookupOrDefault<Switch>("rejectLaplacianOnLowTetQuality",
+                                             true);
         const scalar minAllowedTetQuality =
             topoDict.lookupOrDefault<scalar>("minAllowedTetQuality", 1e-15);
         const label maxAllowedConcaveCells =
@@ -2324,11 +2321,12 @@ int main(int argc, char* argv[])
         const Switch laplacianBacktracking =
             topoDict.lookupOrDefault<Switch>("laplacianBacktracking", false);
         const scalar laplacianBacktrackingFactor =
-            topoDict.lookupOrDefault<scalar>("laplacianBacktrackingFactor", 0.5);
+            topoDict.lookupOrDefault<scalar>("laplacianBacktrackingFactor",
+                                             0.5);
         const scalar laplacianMinRelaxFactor =
             topoDict.lookupOrDefault<scalar>("laplacianMinRelaxFactor", 0.003);
-        const scalar concavityTolerance =
-            topoDict.lookupOrDefault<scalar>("qualityAwareConcavityTolerance", SMALL);
+        const scalar concavityTolerance = topoDict.lookupOrDefault<scalar>(
+            "qualityAwareConcavityTolerance", SMALL);
 
         const Switch bestStateUseQualityScore =
             topoDict.lookupOrDefault<Switch>("bestStateUseQualityScore", false);
@@ -2353,21 +2351,19 @@ int main(int argc, char* argv[])
                  << ", reject on low tet quality: "
                  << rejectLaplacianOnLowTetQuality << endl;
             Info << "    minAllowedTetQuality: " << minAllowedTetQuality
-                 << ", maxAllowedConcaveCells: "
-                 << maxAllowedConcaveCells << endl;
+                 << ", maxAllowedConcaveCells: " << maxAllowedConcaveCells
+                 << endl;
             Info << "    backtracking: " << laplacianBacktracking
                  << ", factor: " << laplacianBacktrackingFactor
-                 << ", min relax factor: " << laplacianMinRelaxFactor
-                 << endl;
+                 << ", min relax factor: " << laplacianMinRelaxFactor << endl;
         }
         if (bestStateUseQualityScore)
         {
             Info << "  - Best-state quality score: enabled" << endl;
-            Info << "    score = maxNonOrtho[deg] + "
-                 << bestStateConcaveWeight
+            Info << "    score = maxNonOrtho[deg] + " << bestStateConcaveWeight
                  << "*nConcave + lowTetPenalty" << endl;
-            Info << "    lowTet penalty weight: "
-                 << bestStateLowTetWeight << endl;
+            Info << "    lowTet penalty weight: " << bestStateLowTetWeight
+                 << endl;
         }
 
         // --- 0: Identify all boundary points that must remain fixed ---
@@ -2410,10 +2406,10 @@ int main(int argc, char* argv[])
             }
         }
 
-        // --- 0b. Optional normal-aware mask for near-terrain Laplacian smoothing ---
-        // The mask is built topologically from wall patches, e.g. terrain_in/terrain_out.
-        // Points in the first normalAwareLayers layers are allowed to smooth only
-        // tangentially to the local terrain normal.
+        // --- 0b. Optional normal-aware mask for near-terrain Laplacian
+        // smoothing --- The mask is built topologically from wall patches, e.g.
+        // terrain_in/terrain_out. Points in the first normalAwareLayers layers
+        // are allowed to smooth only tangentially to the local terrain normal.
         boolList normalAwarePoint(mesh.nPoints(), false);
         vectorField normalAwareNormal(mesh.nPoints(), vector::zero);
 
@@ -2457,8 +2453,7 @@ int main(int argc, char* argv[])
                 }
             }
 
-            syncTools::syncPointList(
-                mesh, frontier, orEqOp<bool>(), false);
+            syncTools::syncPointList(mesh, frontier, orEqOp<bool>(), false);
             syncTools::syncPointList(
                 mesh, normalAwareNormal, plusEqOp<vector>(), vector::zero);
 
@@ -2527,8 +2522,7 @@ int main(int argc, char* argv[])
             }
             reduce(nProtected, sumOp<label>());
 
-            Info << "  - Normal-aware Laplacian points: " << nProtected
-                 << endl;
+            Info << "  - Normal-aware Laplacian points: " << nProtected << endl;
         }
 
         // --- 1. Initial Calculation and Setup for Best-State Tracking ---
@@ -2549,8 +2543,8 @@ int main(int argc, char* argv[])
         scalar bestMinOrtho = initialMinOrtho;
         label bestConcaveCells = 0;
         scalar bestMinTetQuality = GREAT;
-        scalar bestScore = Foam::radToDeg(
-            Foam::acos(max(-1.0, min(1.0, bestMinOrtho))));
+        scalar bestScore =
+            Foam::radToDeg(Foam::acos(max(-1.0, min(1.0, bestMinOrtho))));
 
         if (bestStateUseQualityScore)
         {
@@ -2558,7 +2552,7 @@ int main(int argc, char* argv[])
             bestConcaveCells =
                 countConcaveCellsSimple(mesh, concavityTolerance);
             bestMinTetQuality = minFaceTetQualitySimple(mesh);
-            bestScore += bestStateConcaveWeight*bestConcaveCells;
+            bestScore += bestStateConcaveWeight * bestConcaveCells;
             if (bestMinTetQuality < minAllowedTetQuality)
             {
                 bestScore += bestStateLowTetWeight;
@@ -2813,20 +2807,16 @@ int main(int argc, char* argv[])
                             laplacianRelaxFactor
                             * (P_ideal_blended - currentPos);
 
-                        if
-                        (
-                            normalAwareNearGroundSmoothing
-                         && normalAwarePoint[pointI]
-                         && mag(normalAwareNormal[pointI]) > VSMALL
-                        )
+                        if (normalAwareNearGroundSmoothing
+                            && normalAwarePoint[pointI]
+                            && mag(normalAwareNormal[pointI]) > VSMALL)
                         {
-                            const vector nHat =
-                                normalAwareNormal[pointI]/mag(normalAwareNormal[pointI]);
+                            const vector nHat = normalAwareNormal[pointI]
+                                              / mag(normalAwareNormal[pointI]);
 
                             proposedDisplacement[pointI] -=
                                 normalAwareNormalRelax
-                               *(proposedDisplacement[pointI] & nHat)
-                               *nHat;
+                                * (proposedDisplacement[pointI] & nHat) * nHat;
                         }
                     }
                 }
@@ -2876,7 +2866,8 @@ int main(int argc, char* argv[])
                 while (true)
                 {
                     const_cast<pointField&>(mesh.points()) =
-                        pointsBeforeLaplacian + trialScale*proposedDisplacement;
+                        pointsBeforeLaplacian
+                        + trialScale * proposedDisplacement;
 
                     syncTools::syncPointPositions(
                         mesh,
@@ -2894,34 +2885,25 @@ int main(int argc, char* argv[])
                     mesh.clearGeom();
                     const label newConcaveCells =
                         countConcaveCellsSimple(mesh, concavityTolerance);
-                    const scalar newMinTetQuality = minFaceTetQualitySimple(mesh);
+                    const scalar newMinTetQuality =
+                        minFaceTetQualitySimple(mesh);
 
                     bool badStep = false;
 
-                    if
-                    (
-                        rejectLaplacianOnConcave
-                     && newConcaveCells > oldConcaveCells
-                    )
+                    if (rejectLaplacianOnConcave
+                        && newConcaveCells > oldConcaveCells)
                     {
                         badStep = true;
                     }
 
-                    if
-                    (
-                        rejectLaplacianOnConcave
-                     && maxAllowedConcaveCells >= 0
-                     && newConcaveCells > maxAllowedConcaveCells
-                    )
+                    if (rejectLaplacianOnConcave && maxAllowedConcaveCells >= 0
+                        && newConcaveCells > maxAllowedConcaveCells)
                     {
                         badStep = true;
                     }
 
-                    if
-                    (
-                        rejectLaplacianOnLowTetQuality
-                     && newMinTetQuality < minAllowedTetQuality
-                    )
+                    if (rejectLaplacianOnLowTetQuality
+                        && newMinTetQuality < minAllowedTetQuality)
                     {
                         badStep = true;
                     }
@@ -2934,28 +2916,23 @@ int main(int argc, char* argv[])
                         if (Pstream::master())
                         {
                             Info << "    - Accepted quality-aware Laplacian"
-                                 << " scale " << acceptedScale
-                                 << ": concave " << oldConcaveCells
-                                 << " -> " << newConcaveCells
+                                 << " scale " << acceptedScale << ": concave "
+                                 << oldConcaveCells << " -> " << newConcaveCells
                                  << ", minTetQuality " << oldMinTetQuality
                                  << " -> " << newMinTetQuality << endl;
                         }
                         break;
                     }
 
-                    if
-                    (
-                        laplacianBacktracking
-                     && trialScale*laplacianRelaxFactor
-                        > laplacianMinRelaxFactor + SMALL
-                    )
+                    if (laplacianBacktracking
+                        && trialScale * laplacianRelaxFactor
+                               > laplacianMinRelaxFactor + SMALL)
                     {
                         if (Pstream::master())
                         {
                             Info << "    - Rejecting Laplacian trial scale "
-                                 << trialScale
-                                 << ": concave " << oldConcaveCells
-                                 << " -> " << newConcaveCells
+                                 << trialScale << ": concave "
+                                 << oldConcaveCells << " -> " << newConcaveCells
                                  << ", minTetQuality " << oldMinTetQuality
                                  << " -> " << newMinTetQuality
                                  << ". Backtracking." << endl;
@@ -2970,10 +2947,10 @@ int main(int argc, char* argv[])
                     if (Pstream::master())
                     {
                         Info << "    - Rejected quality-aware Laplacian"
-                             << ": concave " << oldConcaveCells
-                             << " -> " << newConcaveCells
-                             << ", minTetQuality " << oldMinTetQuality
-                             << " -> " << newMinTetQuality << endl;
+                             << ": concave " << oldConcaveCells << " -> "
+                             << newConcaveCells << ", minTetQuality "
+                             << oldMinTetQuality << " -> " << newMinTetQuality
+                             << endl;
                     }
                     break;
                 }
@@ -3202,8 +3179,9 @@ int main(int argc, char* argv[])
                 const scalar currentMinTetQuality =
                     minFaceTetQualitySimple(mesh);
 
-                scalar currentScore = currentMaxNonOrthoDeg
-                    + bestStateConcaveWeight*currentConcaveCells;
+                scalar currentScore =
+                    currentMaxNonOrthoDeg
+                    + bestStateConcaveWeight * currentConcaveCells;
 
                 if (currentMinTetQuality < minAllowedTetQuality)
                 {
@@ -3231,27 +3209,26 @@ int main(int argc, char* argv[])
                 {
                     if (bestStateUseQualityScore)
                     {
-                        Info << "    - New best mesh quality score found at iteration "
-                             << iter + 1
-                             << ": score " << bestScore
+                        Info << "    - New best mesh quality score found at "
+                                "iteration "
+                             << iter + 1 << ": score " << bestScore
                              << ", nonOrtho " << currentMaxNonOrthoDeg
                              << " deg, concave " << bestConcaveCells
-                             << ", minTetQuality " << bestMinTetQuality
-                             << endl;
+                             << ", minTetQuality " << bestMinTetQuality << endl;
                     }
                     else
                     {
-                        Info << "    - New best mesh quality found at iteration "
-                             << iter + 1 << ": "
-                             << currentMaxNonOrthoDeg << " deg." << endl;
+                        Info
+                            << "    - New best mesh quality found at iteration "
+                            << iter + 1 << ": " << currentMaxNonOrthoDeg
+                            << " deg." << endl;
                     }
                 }
             }
             else
             {
-                Info << "curretnMaxAngle "
-                     << currentMaxNonOrthoDeg
-                     << " deg." << endl;
+                Info << "curretnMaxAngle " << currentMaxNonOrthoDeg << " deg."
+                     << endl;
             }
             // --- END OF BEST MESH LOGIC ---
         }
@@ -3277,8 +3254,7 @@ int main(int argc, char* argv[])
             {
                 Info << "Best-state score: " << bestScore
                      << ", concave cells: " << bestConcaveCells
-                     << ", minTetQuality: " << bestMinTetQuality
-                     << endl;
+                     << ", minTetQuality: " << bestMinTetQuality << endl;
             }
         }
         // --- END OF BEST MESH LOGIC ---
