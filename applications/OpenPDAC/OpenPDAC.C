@@ -154,6 +154,12 @@ void Foam::solvers::OpenPDAC::correctCoNum()
         sumPhi /= sqrt(tempOscillationFactor_);
     }
 
+    if (isMeshChanging_)
+    {
+        Info << "Mesh Changing -> Reducing time step " << endl;
+        appliedCorrectionFactor *= 0.1;
+        sumPhi /= sqrt(tempOscillationFactor_);
+    }
 
     CoNum_ =
         0.5 * gMax(sumPhi / mesh.V().primitiveField()) * runTime.deltaTValue();
@@ -449,8 +455,6 @@ Foam::solvers::OpenPDAC::~OpenPDAC() {}
 
 void Foam::solvers::OpenPDAC::preSolve()
 {
-    correctCoNum();
-
     // Store divU from the previous mesh so that it can be
     // mapped and used in correctPhi to ensure the corrected phi
     // has the same divergence.
@@ -475,6 +479,8 @@ void Foam::solvers::OpenPDAC::preSolve()
         Info << "MESH UPDATED. Disabling PIMPLE loop early exit for this "
              << "time step." << endl;
     }
+
+    correctCoNum();
 
     pimpleIter = 0;
     forceFinalPimpleIter_ = false;
@@ -530,10 +536,33 @@ void Foam::solvers::OpenPDAC::prePredictor()
             checkFiniteField(phase.rho(), "prePredictor: phase rho");
         }
 
+
+        /*
         // Reset dmdts to zero
         forAll(dmdts_, i)
         {
             dmdts_[i] = dimensionedScalar(dimDensity / dimTime, 0);
+        }
+
+        fluid_.correctContinuityError(dmdts_);
+        */
+
+        // Reconstruct dmdts on the current mesh.
+        // This is necessary after refinement/unrefinement because
+        // volScalarField::Internal may retain the old mesh size.
+        forAll(dmdts_, i)
+        {
+            dmdts_.set(
+                i,
+                new volScalarField::Internal(
+                    IOobject(IOobject::groupName("dmdt", phases_[i].name()),
+                             runTime.name(),
+                             mesh,
+                             IOobject::NO_READ,
+                             IOobject::NO_WRITE,
+                             false),
+                    mesh,
+                    dimensionedScalar(dimDensity / dimTime, 0)));
         }
 
         fluid_.correctContinuityError(dmdts_);
