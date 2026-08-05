@@ -1,0 +1,11 @@
+url_path,views_total,views_unique
+/demichie/OpenPDAC-13/tree/main/applications/OpenPDAC,31,4
+/demichie/OpenPDAC-13/tree/main/applications/OpenPDAC/momentumTransportModels/kineticTheoryModels,25,3
+/demichie/OpenPDAC-13/tree/main/applications,23,5
+/demichie/OpenPDAC-13/tree/main/applications/OpenPDAC/phaseSystem,20,4
+/demichie/OpenPDAC-13/tree/main/applications/OpenPDAC/phaseSystem/interfacialModels/dragModels,20,3
+/demichie/OpenPDAC-13/tree/main/applications/OpenPDAC/momentumTransportModels,18,3
+/demichie/OpenPDAC-13/tree/main/applications/OpenPDAC/momentumTransportModels/kineticTheoryModels/kineticTheoryModel,14,3
+/demichie/OpenPDAC-13,13,7
+/demichie/OpenPDAC-13/tree/main/applications/OpenPDAC/phaseSystem/interfacialModels/dragModels/solidSolidDrag,13,2
+/demichie/OpenPDAC-13/tree/main/applications/OpenPDAC/parcel,12,2
